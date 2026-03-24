@@ -19,13 +19,13 @@ export async function POST(request: Request) {
     // Use specifically selected papers
     const placeholders = paperIds.map(() => '?').join(',');
     papers = await db.all(
-      `SELECT title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE id IN (${placeholders}) AND status = 'approved'`,
+      `SELECT id, title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE id IN (${placeholders}) AND status = 'approved'`,
       paperIds
     );
   } else {
     // Auto-load ALL approved papers when nothing is selected
     papers = await db.all(
-      `SELECT title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE status = 'approved'`
+      `SELECT id, title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE status = 'approved'`
     );
   }
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     const authors = p.authors ? JSON.parse(p.authors) : [];
     const keyFindings = p.key_findings ? JSON.parse(p.key_findings) : [];
     return `
-=== PAPER: ${p.title} ===
+=== PAPER: ${p.title} (ID: ${p.id}) ===
 Publisher/House: ${p.publisher || 'Unknown'}
 Authors: ${authors.join(', ') || 'Unknown'}
 Date: ${p.published_date || 'Unknown'}
@@ -56,6 +56,10 @@ ${keyFindings.map((f: string, i: number) => `${i+1}. ${f}`).join('\n')}
 You have access to ${selectedNote}. Answer questions STRICTLY based on the content of these papers.
 If you cannot find the answer in the papers, say "Based on the ${paperCount} papers in context, I cannot find specific information about this. The papers available are: [list titles]."
 Do NOT use general knowledge as a substitute for paper content.
+
+VERY IMPORTANT: Whenever you reference or cite a specific paper, you MUST provide a markdown link to it using its exact ID from the context.
+Format your link EXACTLY like this: [Paper Title](paper://<id>)
+Example: [Global Market Outlook 2026](paper://4)
 
 PAPERS IN CONTEXT:
 ${context}`;

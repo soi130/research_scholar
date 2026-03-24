@@ -149,7 +149,14 @@ export default function DashboardLayout() {
                 )}
               </div>
             )}
-            {view === 'chat' && <ChatPanel selectedPaperIds={selectedPaperIds} />}
+            {view === 'chat' && (
+              <ChatPanel 
+                selectedPaperIds={selectedPaperIds} 
+                onOpenViewer={(id) => setActiveViewerId(id)} 
+                onClearSelection={() => setSelectedPaperIds([])}
+                onOpenLibrary={() => setView('library')}
+              />
+            )}
             {view === 'search' && (
               <div className="space-y-8 h-full">
                 {searchQuery.trim() ? (
