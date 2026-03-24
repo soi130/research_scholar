@@ -1,33 +1,86 @@
-# Scholar.AI - Research Paper Library
+# 🎓 KKP Scholar: AI Research Co-Pilot
 
-A modern, AI-powered web application for managing research papers.
+![Dashboard Preview](public/images/dashboard.png)
 
-## Features
-- **Automatic Metadata Extraction**: Reads PDFs and extracts title, authors, findings, and more using Gemini AI.
-- **Human-in-the-Loop Review**: Approve or edit AI-generated metadata before it enters your library.
-- **Multi-Paper Chat**: Chat with multiple research papers simultaneously to compare methodologies or results.
-- **Glassmorphism UI**: A premium, dark-themed interface built with Next.js and Tailwind CSS.
+**KKP Scholar** is a premium, local-first research management platform that uses AI to automate the tedious parts of handling institutional research papers. 
 
-## Windows Setup Instructions
+Built with a modern **Lavender & Violet** aesthetic, it provides a seamless workflow from raw PDF ingestion to deep AI-driven insights.
 
-1. **Install Node.js**: Download and install from [nodejs.org](https://nodejs.org/).
-2. **Setup Folder Structure**:
-   - Create a folder for your papers (e.g., `C:\MyResearch\Storage`).
-   - Copy the `paper-library-app` folder anywhere on your machine.
-3. **Configure API Key**:
-   - Rename `.env.local.example` to `.env.local`.
-   - Add your [Google Gemini API Key](https://aistudio.google.com/app/apikey).
-   - Set `PAPERS_STORAGE_PATH` to the absolute path of your papers folder.
-4. **Install Dependencies**:
-   - Open PowerShell or Command Prompt in the `paper-library-app` folder.
-   - Run: `npm install --legacy-peer-deps`
-5. **Run the App**:
-   - Run: `npm run dev`
-   - Open your browser to `http://localhost:3000`.
+---
 
-## How to use
-1. Put your PDF papers into the configured folder.
-2. Open the app and click **"Sync Library"**.
-3. Go to **"Review Queue"** to verify the AI-extracted data.
-4. Click the checkmark to **Approve**.
-5. Once approved, papers appear in the **Dashboard** where you can select them for **Multi-Chat**.
+## ✨ Key Features
+
+- 🕵️ **Automated Metadata Extraction**: Automatically identifies titles, authors, journals, and key findings from PDFs using Google Gemini AI.
+- 🧘 **Human-in-the-Loop Review**: A dedicated "Review Queue" let's you verify and approve AI-generated metadata before it joins your permanent library.
+- 💬 **AI Multi-Chat (RAG)**: Select multiple papers and chat with them simultaneously. Synthesize insights across documents with a research-aware AI co-pilot.
+- 📖 **Split-Pane PDF Viewer**: Read your documents alongside your chat or dashboard with a high-performance integrated viewer.
+- 🛡️ **Privacy & Security**: Built with a privacy-first approach. All PDFs and local SQLite databases are automatically excluded from Git tracking.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework**: [Next.js 15+](https://nextjs.org/) (App Router)
+- **UI**: [React 19](https://react.dev/), [Tailwind CSS v4](https://tailwindcss.com/)
+- **Animations**: [Framer Motion](https://www.framer.com/motion/)
+- **Database**: [SQLite](https://www.sqlite.org/) (Local-first)
+- **AI Integration**: [LangChain](https://www.langchain.com/) & [Google Gemini SDK](https://ai.google.dev/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- Node.js 18.x or higher
+- A [Google Gemini API Key](https://aistudio.google.com/app/apikey)
+
+### 2. Installation
+Clone the repository and install dependencies:
+```bash
+git clone https://github.com/soi130/research_scholar.git
+cd paper-library-app
+npm install
+```
+
+### 3. Configuration
+Rename `.env.local.example` to `.env.local` and add your details:
+```env
+GEMINI_API_KEY=your_key_here
+PAPERS_STORAGE_PATH=/path/to/your/pdf/folder
+```
+
+### 4. Run the App
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## 🏗️ Project Architecture
+
+```mermaid
+graph TD
+    A[papres_storage] -->|Ingest| B(lib/ingest.ts)
+    B -->|Parse| C{pdf-parse}
+    C -->|Extract| D[Gemini AI]
+    D -->|Store| E[(SQLite papers.db)]
+    E -->|Display| F[Dashboard UI]
+    F -->|Context| G[AI Multi-Chat]
+    G -->|RAG| D
+```
+
+---
+
+## 🛡️ Data Security Policy
+
+To protect copyrighted material and local state, this project includes a robust `.gitignore` strategy:
+- **`*.pdf`**: All research papers are ignored by default.
+- **`papers.db*`**: Your local metadata database stays on your machine.
+- **`/papres_storage`**: The source ingestion folder is explicitly excluded.
+
+---
+
+## 📜 License
+This project is for private research use. Please ensure you have the rights to use the PDF documents you ingest.
