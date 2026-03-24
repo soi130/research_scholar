@@ -2,6 +2,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Loader2, Eraser } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -10,7 +12,7 @@ interface Message {
 
 export default function ChatPanel({ selectedPaperIds }: { selectedPaperIds: number[] }) {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: "Hello! I'm your research assistant. I have access to the selected papers. How can I help you today?" }
+    { role: 'assistant', content: "Hello! I'm your research assistant. I have access to your entire approved paper library, or you can select specific papers to focus on. How can I help you today?" }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -57,7 +59,7 @@ export default function ChatPanel({ selectedPaperIds }: { selectedPaperIds: numb
            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Research Co-Pilot</span>
          </div>
-         <button onClick={() => setMessages([{ role: 'assistant', content: "Hello! History cleared. How can I help you navigate these papers?" }])} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+         <button onClick={() => setMessages([{ role: 'assistant', content: "Hello! History cleared. How can I help you navigate the library?" }])} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
            <Eraser size={14} />
          </button>
       </div>
@@ -69,12 +71,34 @@ export default function ChatPanel({ selectedPaperIds }: { selectedPaperIds: numb
             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm ${m.role === 'user' ? 'bg-violet-600 text-white' : 'bg-slate-100 text-violet-600 border border-slate-200/50'}`}>
               {m.role === 'user' ? <User size={14} /> : <Bot size={14} />}
             </div>
-            <div className={`max-w-[85%] p-4 rounded-3xl text-sm leading-relaxed shadow-sm ${
+            <div className={`max-w-[85%] overflow-x-auto p-4 rounded-3xl text-sm leading-relaxed shadow-sm ${
               m.role === 'user' 
                 ? 'bg-violet-600 text-white rounded-tr-none font-medium' 
                 : 'bg-slate-50 text-slate-900 rounded-tl-none border border-slate-100'
             }`}>
-              {m.content}
+              {m.role === 'user' ? (
+                m.content
+              ) : (
+                <ReactMarkdown 
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
+                    ol: ({node, ...props}) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
+                    li: ({node, ...props}) => <li className="" {...props} />,
+                    table: ({node, ...props}) => <div className="overflow-x-auto my-4 rounded-xl border border-slate-200"><table className="w-full text-left border-collapse text-xs" {...props} /></div>,
+                    th: ({node, ...props}) => <th className="bg-slate-100/50 border-b-2 border-slate-200 p-3 font-bold text-slate-700 whitespace-nowrap" {...props} />,
+                    td: ({node, ...props}) => <td className="border-b border-slate-100 p-3 bg-white" {...props} />,
+                    p: ({node, ...props}) => <p className="mb-3 last:mb-0" {...props} />,
+                    a: ({node, ...props}) => <a className="text-violet-600 hover:text-violet-700 underline underline-offset-2 font-medium" {...props} />,
+                    strong: ({node, ...props}) => <strong className="font-bold text-violet-900" {...props} />,
+                    h1: ({node, ...props}) => <h1 className="text-lg font-black text-slate-900 mt-4 mb-2" {...props} />,
+                    h2: ({node, ...props}) => <h2 className="text-base font-bold text-slate-900 mt-3 mb-2" {...props} />,
+                    h3: ({node, ...props}) => <h3 className="text-sm font-bold text-slate-800 mt-2 mb-1" {...props} />,
+                  }}
+                >
+                  {m.content}
+                </ReactMarkdown>
+              )}
             </div>
           </div>
         ))}
@@ -99,12 +123,12 @@ export default function ChatPanel({ selectedPaperIds }: { selectedPaperIds: numb
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder={selectedPaperIds.length > 0 ? `Ask about these ${selectedPaperIds.length} papers...` : "Select papers from dashboard to start"}
+            placeholder={selectedPaperIds.length > 0 ? `Ask about these ${selectedPaperIds.length} papers...` : "Ask the AI about your entire library..."}
             className="w-full bg-slate-100/50 border border-slate-200/50 rounded-2xl py-3.5 pl-5 pr-14 outline-none focus:border-violet-500/30 focus:bg-white focus:ring-4 focus:ring-violet-500/5 transition-all text-sm text-slate-900 placeholder:text-slate-400"
           />
           <button 
             onClick={handleSend}
-            disabled={!input.trim() || loading || selectedPaperIds.length === 0}
+            disabled={!input.trim() || loading}
             className="absolute right-2 p-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-20 disabled:grayscale rounded-xl text-white shadow-lg shadow-violet-600/20 active:scale-95 transition-all"
           >
             <Send size={18} />

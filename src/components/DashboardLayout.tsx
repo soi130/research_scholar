@@ -18,6 +18,7 @@ export default function DashboardLayout() {
   const [selectedPaperIds, setSelectedPaperIds] = useState<number[]>([]);
   const [activeViewerId, setActiveViewerId] = useState<number | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const handleScan = async () => {
     setIsScanning(true);
@@ -87,23 +88,10 @@ export default function DashboardLayout() {
           ))}
         </nav>
 
-        <div className="p-3 border-t border-slate-200/50 mt-auto">
-          {!isCollapsed ? (
-            <div className="p-4 bg-slate-100/50 rounded-2xl border border-slate-200/50">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Alpha v2.0</p>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center text-xs font-bold">JD</div>
-                <div>
-                  <p className="text-xs font-bold text-slate-900">John Doe</p>
-                  <p className="text-[10px] text-slate-400">Advanced Research</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-             <button className="w-full flex justify-center py-4 text-slate-400 hover:text-slate-900 transition-all">
-                <Settings size={20} />
-             </button>
-          )}
+        <div className="p-3 border-t border-slate-200/50 mt-auto flex justify-center">
+          <button className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-slate-100">
+            <Settings size={20} />
+          </button>
         </div>
       </aside>
 
@@ -115,6 +103,8 @@ export default function DashboardLayout() {
             <input 
               type="text" 
               placeholder="Search through papers, house views, or topics..." 
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
               className="w-full bg-slate-100/50 border border-slate-200/50 rounded-2xl py-2.5 pl-12 pr-4 outline-none focus:border-violet-500/30 focus:bg-white transition-all placeholder:text-slate-400 text-sm shadow-inner"
             />
           </div>
@@ -149,21 +139,28 @@ export default function DashboardLayout() {
             {(view === 'library' || view === 'review') && (
               <div className="flex flex-col gap-8">
                 {view === 'review' ? (
-                  <ReviewGrid onOpenViewer={(id) => setActiveViewerId(id)} />
+                  <ReviewGrid onOpenViewer={(id) => setActiveViewerId(id)} searchQuery={searchQuery} />
                 ) : (
                   <LibraryView 
                     onSelectForChat={(ids) => { setSelectedPaperIds(ids); if(ids.length > 0) setView('chat'); }} 
                     onOpenViewer={(id) => setActiveViewerId(id)}
+                    searchQuery={searchQuery}
                   />
                 )}
               </div>
             )}
             {view === 'chat' && <ChatPanel selectedPaperIds={selectedPaperIds} />}
             {view === 'search' && (
-              <div className="glass p-20 rounded-3xl text-center border-dashed border-2 border-slate-200 text-slate-400">
-                <Search size={48} className="mx-auto text-slate-200 mb-6" />
-                <h3 className="text-xl font-bold text-slate-900 mb-2">Semantic Document Search</h3>
-                <p className="max-w-sm mx-auto text-sm">Advanced page-level search coming in the next update. Use the global search bar for metadata exploration.</p>
+              <div className="space-y-8 h-full">
+                {searchQuery.trim() ? (
+                  <LibraryView onSelectForChat={setSelectedPaperIds} onOpenViewer={setActiveViewerId} searchQuery={searchQuery} />
+                ) : (
+                  <div className="glass p-20 rounded-3xl text-center border-dashed border-2 border-slate-200 text-slate-400">
+                    <Search size={48} className="mx-auto text-slate-200 mb-6" />
+                    <h3 className="text-xl font-bold text-slate-900 mb-2">Deep Content Search</h3>
+                    <p className="max-w-sm mx-auto text-sm">Use the search bar above to explore paper titles, authors, tags, and abstracts across your entire library.</p>
+                  </div>
+                )}
               </div>
             )}
           </div>

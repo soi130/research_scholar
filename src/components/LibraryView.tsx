@@ -35,13 +35,28 @@ const renderValue = (v: any): string => {
 
 import PdfThumbnail from './PdfThumbnail';
 
-export default function LibraryView({ onSelectForChat, onOpenViewer }: { 
+export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery = '' }: { 
   onSelectForChat: (ids: number[]) => void,
-  onOpenViewer?: (id: number) => void 
+  onOpenViewer?: (id: number) => void,
+  searchQuery?: string
 }) {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<number[]>([]);
+
+  // Use memoized filtered papers
+  const filteredPapers = React.useMemo(() => {
+    if (!searchQuery.trim()) return papers;
+    const q = searchQuery.toLowerCase();
+    return papers.filter(p => 
+      p.title?.toLowerCase().includes(q) ||
+      (p.authors || []).some(a => a.toLowerCase().includes(q)) ||
+      p.publisher?.toLowerCase().includes(q) ||
+      (p.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      p.published_date?.toLowerCase().includes(q) ||
+      p.filename?.toLowerCase().includes(q)
+    );
+  }, [papers, searchQuery]);
 
   const fetchPapers = async () => {
     setLoading(true);
@@ -60,7 +75,14 @@ export default function LibraryView({ onSelectForChat, onOpenViewer }: {
       ? selected.filter(s => s !== id) 
       : [...selected, id];
     setSelected(newSelected);
+    // Only inform parent if we are multi-selecting. If the user clears, we pass empty.
     onSelectForChat(newSelected);
+  };
+
+  const handleCardClick = (id: number) => {
+    setSelected([id]);
+    onSelectForChat([id]);
+    if (onOpenViewer) onOpenViewer(id);
   };
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-violet-500 w-10 h-10" /></div>;
@@ -80,10 +102,10 @@ export default function LibraryView({ onSelectForChat, onOpenViewer }: {
       )}
 
       <div className="flex flex-col gap-6">
-        {papers.map((paper) => (
+        {filteredPapers.map((paper) => (
           <div 
             key={paper.id} 
-            onClick={() => toggleSelect(paper.id)}
+            onClick={() => handleCardClick(paper.id)}
             className={`glass group relative p-5 rounded-3xl border transition-all cursor-pointer flex gap-6 items-center overflow-hidden ${
               selected.includes(paper.id) 
                 ? 'border-violet-500/30 bg-violet-500/5 ring-1 ring-violet-500/10' 
@@ -130,13 +152,25 @@ export default function LibraryView({ onSelectForChat, onOpenViewer }: {
                   ))}
                 </div>
               )}
+
+              {paper.tags && paper.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {paper.tags.map((tag) => (
+                    <span key={tag} className="text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200/50">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Selection indicator */}
-            <div className={cn(
-               "absolute top-4 right-4 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
+            <div 
+               onClick={(e) => { e.stopPropagation(); toggleSelect(paper.id); }}
+               className={cn(
+               "absolute top-4 right-4 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all hover:scale-125 z-10",
                selected.includes(paper.id) 
-                ? "bg-violet-600 border-violet-500 text-white scale-110 shadow-lg shadow-violet-500/30" 
+                ? "bg-violet-600 border-violet-500 text-white shadow-lg shadow-violet-500/30" 
                 : "bg-white/50 border-white/80 text-transparent border-slate-200"
             )}>
                <Check size={12} strokeWidth={4} />

@@ -15,6 +15,10 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
 
   useEffect(() => {
     let isMounted = true;
+    let loadingTask: any = null;
+    let pdfDoc: any = null;
+    let renderTask: any = null;
+    let timeoutId: NodeJS.Timeout;
 
     const renderThumbnail = async () => {
       try {
@@ -27,9 +31,9 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
         // Set worker path
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-        const loadingTask = pdfjsLib.getDocument(`/api/papers/${paperId}/serve`);
-        const pdf = await loadingTask.promise;
-        const page = await pdf.getPage(1);
+        loadingTask = pdfjsLib.getDocument(`/api/papers/${paperId}/serve`);
+        pdfDoc = await loadingTask.promise;
+        const page = await pdfDoc.getPage(1);
 
         if (!isMounted || !canvasRef.current) return;
 
@@ -48,9 +52,11 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
           canvas: canvas,
         };
 
-        await page.render(renderContext).promise;
+        renderTask = page.render(renderContext);
+        await renderTask.promise;
         if (isMounted) setLoading(false);
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.name === 'RenderingCancelledException') return;
         console.error('Thumbnail error:', err);
         if (isMounted) {
           setError(true);
@@ -59,10 +65,23 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
       }
     };
 
-    renderThumbnail();
+    // Add a debounce to prevent rapid firing during search filtering
+    timeoutId = setTimeout(() => {
+      if (isMounted) renderThumbnail();
+    }, 300);
 
     return () => {
       isMounted = false;
+      clearTimeout(timeoutId);
+      if (renderTask) {
+        try { renderTask.cancel(); } catch(e) {}
+      }
+      if (loadingTask && typeof loadingTask.destroy === 'function') {
+        try { loadingTask.destroy(); } catch(e) {}
+      }
+      if (pdfDoc && typeof pdfDoc.destroy === 'function') {
+        try { pdfDoc.destroy(); } catch(e) {}
+      }
     };
   }, [paperId]);
 

@@ -23,9 +23,9 @@ export async function POST(request: Request) {
       paperIds
     );
   } else {
-    // Auto-load latest 10 approved papers when nothing is selected
+    // Auto-load ALL approved papers when nothing is selected
     papers = await db.all(
-      `SELECT title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE status = 'approved' ORDER BY created_at DESC LIMIT 10`
+      `SELECT title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE status = 'approved'`
     );
   }
 

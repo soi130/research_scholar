@@ -36,13 +36,28 @@ const renderValue = (v: any): string => {
 
 import PdfThumbnail from './PdfThumbnail';
 
-export default function ReviewGrid({ onOpenViewer }: { onOpenViewer?: (id: number) => void }) {
+export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenViewer?: (id: number) => void, searchQuery?: string }) {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Partial<Paper>>({});
   const [masterTags, setMasterTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
+  const [tagInputValue, setTagInputValue] = useState('');
+
+  // Use memoized filtered papers for the review grid
+  const filteredPapers = React.useMemo(() => {
+    if (!searchQuery.trim()) return papers;
+    const q = searchQuery.toLowerCase();
+    return papers.filter(p => 
+      p.title?.toLowerCase().includes(q) ||
+      (p.authors || []).some(a => a.toLowerCase().includes(q)) ||
+      p.publisher?.toLowerCase().includes(q) ||
+      (p.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      p.published_date?.toLowerCase().includes(q) ||
+      p.filename?.toLowerCase().includes(q)
+    );
+  }, [papers, searchQuery]);
 
   const fetchPending = async () => {
     setLoading(true);
@@ -97,6 +112,15 @@ export default function ReviewGrid({ onOpenViewer }: { onOpenViewer?: (id: numbe
     setEditValues({ ...editValues, tags: newTags });
   };
 
+  const handleApproveAll = async () => {
+    if (!window.confirm(`Are you sure you want to approve all ${filteredPapers.length} filtered papers in the queue?`)) return;
+    setLoading(true);
+    for (const p of filteredPapers) {
+      await fetch(`/api/papers/${p.id}`, { method: 'POST' });
+    }
+    fetchPending();
+  };
+
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-violet-500 w-10 h-10" /></div>;
 
   if (papers.length === 0) return (
@@ -109,28 +133,56 @@ export default function ReviewGrid({ onOpenViewer }: { onOpenViewer?: (id: numbe
 
   return (
     <div className="space-y-10">
-      {/* Global Tag Manager (Light Mode refined) */}
-      <div className="glass p-6 rounded-3xl border border-slate-200/50 flex gap-4 items-center shadow-lg shadow-slate-200/20">
-        <span className="text-sm text-slate-500 font-bold flex items-center gap-2 uppercase tracking-tight"><TagIcon size={16} className="text-violet-500" /> Global Tags:</span>
-        <div className="flex-1 flex gap-2">
-           <input 
-            type="text" 
-            placeholder="Create new institutional tag..." 
-            className="flex-1 bg-slate-100/50 border border-slate-200/50 rounded-xl px-4 py-2 text-sm text-slate-900 focus:outline-none focus:border-violet-500 focus:bg-white transition-all shadow-inner"
-            value={newTag}
-            onChange={e => setNewTag(e.target.value)}
-          />
-          <button 
-            onClick={handleAddMasterTag}
-            className="px-6 bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-all shadow-lg shadow-violet-500/20 flex items-center gap-2 text-sm font-bold"
-          >
-            <Plus size={18} /> Add Tag
-          </button>
+      <div className="flex justify-between items-center gap-6">
+        {/* Global Tag Manager (Light Mode refined) */}
+        <div className="glass p-6 rounded-3xl border border-slate-200/50 flex-1 flex gap-4 items-center shadow-lg shadow-slate-200/20">
+          <span className="text-sm text-slate-500 font-bold flex items-center gap-2 uppercase tracking-tight"><TagIcon size={16} className="text-violet-500" /> Global Tags:</span>
+          <div className="flex-1 flex gap-2 relative z-50">
+             <input 
+              type="text" 
+              placeholder="Create new institutional tag..." 
+              className="flex-1 bg-slate-100/50 border border-slate-200/50 rounded-xl px-4 py-2 text-sm text-slate-900 focus:outline-none focus:border-violet-500 focus:bg-white transition-all shadow-inner"
+              value={newTag}
+              onChange={e => setNewTag(e.target.value)}
+              onKeyDown={e => { if(e.key === 'Enter') handleAddMasterTag(); }}
+            />
+            {newTag.trim() && masterTags.some(t => t.toLowerCase().includes(newTag.toLowerCase()) && t.toLowerCase() !== newTag.toLowerCase()) && (
+              <div className="absolute top-[120%] left-0 w-[calc(100%-8rem)] bg-white border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto overflow-hidden">
+                {masterTags.filter(t => t.toLowerCase().includes(newTag.toLowerCase()) && t.toLowerCase() !== newTag.toLowerCase()).map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => setNewTag('')}
+                    className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700 font-bold border-b border-slate-100 last:border-0"
+                  >
+                    {tag.toUpperCase()} <span className="text-slate-400 text-xs ml-2 font-normal">(Already in pool)</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button 
+              onClick={handleAddMasterTag}
+              className="px-6 bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-all shadow-lg shadow-violet-500/20 flex items-center gap-2 text-sm font-bold"
+            >
+              <Plus size={18} /> Add Tag
+            </button>
+          </div>
         </div>
+
+        {/* Bulk Actions */}
+        {filteredPapers.length > 0 && (
+          <div className="glass p-6 rounded-3xl border border-slate-200/50 flex items-center shadow-lg shadow-slate-200/20 flex-shrink-0">
+            <button 
+              onClick={handleApproveAll}
+              className="px-8 py-2.5 bg-red-500 hover:bg-red-600 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-red-500/20 flex items-center gap-2 text-sm font-black tracking-widest uppercase"
+            >
+              <Check size={18} strokeWidth={3} /> Approve All
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-8">
-        {papers.map((paper) => (
+        {filteredPapers.map((paper) => (
           <div key={paper.id} className="glass group relative p-6 rounded-[2.5rem] border border-slate-200/50 hover:border-violet-500/30 hover:bg-white transition-all duration-500 shadow-sm hover:shadow-2xl hover:shadow-violet-500/5 flex gap-8 items-center overflow-hidden">
             
             {/* 1st Page Preview (List Mode) */}
@@ -165,7 +217,7 @@ export default function ReviewGrid({ onOpenViewer }: { onOpenViewer?: (id: numbe
                         <button onClick={() => setEditingId(null)} className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-200 transition-all"><X size={18} /></button>
                       </>
                     ) : (
-                      <button onClick={() => { setEditingId(paper.id); setEditValues(paper); }} className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-violet-50 hover:text-violet-600 transition-all"><Edit3 size={18} /></button>
+                      <button onClick={() => { setEditingId(paper.id); setEditValues(paper); setTagInputValue(''); }} className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-violet-50 hover:text-violet-600 transition-all"><Edit3 size={18} /></button>
                     ) }
                   </div>
                </div>
@@ -173,18 +225,93 @@ export default function ReviewGrid({ onOpenViewer }: { onOpenViewer?: (id: numbe
                <div className="flex flex-wrap gap-4 text-[10px] items-center">
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 rounded-xl border border-slate-200/30">
                     <span className="text-slate-400 font-black uppercase tracking-widest"><Building2 size={10} className="inline mr-1" /> HOUSE:</span>
-                    <span className="font-bold text-slate-900">{paper.publisher || 'N/A'}</span>
+                    {editingId === paper.id ? (
+                      <input 
+                        className="bg-white border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none"
+                        value={editValues.publisher || ''}
+                        onChange={e => setEditValues({...editValues, publisher: e.target.value})}
+                      />
+                    ) : (
+                      <span className="font-bold text-slate-900">{paper.publisher || 'N/A'}</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 rounded-xl border border-slate-200/30">
                     <span className="text-slate-400 font-black uppercase tracking-widest"><Calendar size={10} className="inline mr-1" /> DATE:</span>
-                    <span className="font-bold text-slate-900">{paper.published_date || 'N/A'}</span>
+                    {editingId === paper.id ? (
+                      <input 
+                        className="bg-white border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none w-24"
+                        value={editValues.published_date || ''}
+                        onChange={e => setEditValues({...editValues, published_date: e.target.value})}
+                      />
+                    ) : (
+                      <span className="font-bold text-slate-900">{paper.published_date || 'N/A'}</span>
+                    )}
                   </div>
-                  <div className="flex-1 overflow-x-auto no-scrollbar flex gap-2">
-                    {(paper.tags || []).map(tag => (
-                      <span key={tag} className="px-2 py-1 bg-violet-50 text-violet-600 rounded-lg font-black tracking-wide border border-violet-100">
-                        {tag.toUpperCase()}
-                      </span>
-                    ))}
+                  <div className="flex-1 flex flex-wrap gap-2">
+                    {editingId === paper.id ? (
+                      <div className="flex flex-wrap gap-2 items-center w-full">
+                        {Array.from(new Set([...masterTags, ...(paper.tags || []), ...(editValues.tags || [])])).map(tag => (
+                         <button
+                           key={tag}
+                           onClick={(e) => { e.stopPropagation(); toggleTag(paper.id, tag); }}
+                           className={`px-2 py-1 rounded-lg font-black tracking-wide border transition-colors ${
+                             (editValues.tags || []).includes(tag)
+                               ? 'bg-violet-600 text-white border-violet-600'
+                               : 'bg-white text-slate-400 border-slate-200 hover:border-violet-300'
+                           }`}
+                         >
+                           {tag.toUpperCase()}
+                         </button>
+                        ))}
+                        <div className="relative z-50">
+                          <input
+                            type="text"
+                            placeholder="+ New Tag"
+                            className="bg-white border border-dashed border-violet-300 rounded-lg px-2 py-1 text-[10px] font-black tracking-wide text-violet-600 outline-none w-32 placeholder:text-violet-300 focus:border-violet-500 focus:bg-violet-50"
+                            value={tagInputValue}
+                            onChange={(e) => setTagInputValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && tagInputValue.trim()) {
+                                e.preventDefault();
+                                const newT = tagInputValue.trim().toLowerCase();
+                                if (!(editValues.tags || []).includes(newT)) {
+                                  setEditValues(prev => ({...prev, tags: [...(prev.tags || []), newT]}));
+                                }
+                                setTagInputValue('');
+                              }
+                            }}
+                          />
+                          {tagInputValue.trim() && masterTags.some(t => t.toLowerCase().includes(tagInputValue.toLowerCase()) && !(editValues.tags || []).includes(t.toLowerCase())) && (
+                            <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                              {masterTags
+                                .filter(t => t.toLowerCase().includes(tagInputValue.toLowerCase()) && !(editValues.tags || []).includes(t.toLowerCase()))
+                                .map(tag => (
+                                <button
+                                  key={tag}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setEditValues(prev => ({...prev, tags: [...(prev.tags || []), tag]}));
+                                    setTagInputValue('');
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-[10px] text-slate-700 hover:bg-violet-50 hover:text-violet-700 font-black tracking-wide border-b border-slate-100 last:border-0 uppercase"
+                                >
+                                  {tag}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 overflow-x-auto no-scrollbar flex gap-2">
+                        {(paper.tags || []).map(tag => (
+                          <span key={tag} className="px-2 py-1 bg-violet-50 text-violet-600 rounded-lg font-black tracking-wide border border-violet-100">
+                            {tag.toUpperCase()}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                </div>
 
