@@ -9,9 +9,24 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@langchain/community": "^1.1.24",
+    "@langchain/core": "^1.1.35",
+    "busboy": "^1.6.0",
+    "chokidar": "^5.0.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.38.0",
+    "langchain": "^1.2.36",
+    "lucide-react": "^0.577.0",
     "next": "16.2.1",
+    "openai": "^6.32.0",
+    "pdf-parse": "^2.4.5",
+    "pdf2json": "^4.0.2",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
