@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Library, MessageSquareShare, Settings, Search, RefreshCw, Loader2, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Library, MessageSquareShare, Settings, Search, RefreshCw, Loader2, X, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import ReviewGrid from './ReviewGrid';
 import LibraryView from './LibraryView';
 import ChatPanel from './ChatPanel';
+import GraphView from './GraphView';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -13,7 +14,8 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function DashboardLayout() {
-  const [view, setView] = useState<'library' | 'review' | 'chat' | 'search'>('library');
+  type View = 'library' | 'review' | 'chat' | 'search' | 'graph';
+  const [view, setView] = useState<View>('library');
   const [isScanning, setIsScanning] = useState(false);
   const [selectedPaperIds, setSelectedPaperIds] = useState<number[]>([]);
   const [activeViewerId, setActiveViewerId] = useState<number | null>(null);
@@ -31,9 +33,10 @@ export default function DashboardLayout() {
   const navItems = [
     { id: 'library', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'review', label: 'Review Queue', icon: RefreshCw },
+    { id: 'graph', label: 'Knowledge Graph', icon: Share2 },
     { id: 'search', label: 'PDF Search', icon: Search },
     { id: 'chat', label: 'AI Multi-Chat', icon: MessageSquareShare },
-  ];
+  ] as const satisfies ReadonlyArray<{ id: View; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }>;
 
   return (
     <div className="h-screen bg-[#fdfcff] text-slate-900 font-sans selection:bg-violet-500/20 flex overflow-hidden">
@@ -65,7 +68,7 @@ export default function DashboardLayout() {
           {navItems.map((item) => (
             <button 
               key={item.id}
-              onClick={() => setView(item.id as any)}
+              onClick={() => setView(item.id)}
               className={cn(
                 "flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
                 view === item.id 
@@ -102,7 +105,7 @@ export default function DashboardLayout() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-violet-600 transition-colors" size={18} />
             <input 
               type="text" 
-              placeholder="Search through papers, house views, or topics..." 
+              placeholder="Search papers, authors, tags, or topics..." 
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full bg-slate-100/50 border border-slate-200/50 rounded-2xl py-2.5 pl-12 pr-4 outline-none focus:border-violet-500/30 focus:bg-white transition-all placeholder:text-slate-400 text-sm shadow-inner"
@@ -124,14 +127,27 @@ export default function DashboardLayout() {
         <div className="flex-1 overflow-y-auto p-10 custom-scrollbar scroll-smooth">
           <div className="mb-12">
             <h1 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-4">
-              {view === 'review' ? 'Awaiting Human Review' : view === 'library' ? 'Research Dashboard' : view === 'search' ? 'Document Exploration' : 'Financial Insights Multi-Chat'}
+              {view === 'review'
+                ? 'Awaiting Human Review'
+                : view === 'library'
+                  ? 'Research Dashboard'
+                  : view === 'graph'
+                    ? 'Knowledge Graph'
+                    : view === 'search'
+                      ? 'Document Exploration'
+                      : 'Financial Insights Multi-Chat'}
             </h1>
             <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
               <span className="w-8 h-px bg-slate-200"></span>
-              {view === 'review' ? 'Verify and approve AI-generated research metadata.' : 
-               view === 'library' ? 'Explore your institutional research collection.' : 
-               view === 'search' ? 'Deep-dive search through every document page.' :
-               'Synthesize complex views across multiple houses.'}
+              {view === 'review'
+                ? 'Verify and approve AI-generated research metadata.'
+                : view === 'library'
+                  ? 'Explore your institutional research collection.'
+                  : view === 'graph'
+                    ? 'Trace relationships between papers, authors, tags, publishers, and shared themes.'
+                    : view === 'search'
+                      ? 'Deep-dive search through every document page.'
+                      : 'Synthesize complex views across multiple houses.'}
             </div>
           </div>
 
@@ -148,6 +164,12 @@ export default function DashboardLayout() {
                   />
                 )}
               </div>
+            )}
+            {view === 'graph' && (
+              <GraphView
+                onOpenViewer={(id) => setActiveViewerId(id)}
+                searchQuery={searchQuery}
+              />
             )}
             {view === 'chat' && (
               <ChatPanel 

@@ -9,11 +9,44 @@ const openAIKey = process.env.OPENAI_API_KEY;
 const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
 const openai = openAIKey ? new OpenAI({ apiKey: openAIKey }) : null;
 
+function buildFtsQuery(input: string): string {
+  const stopwords = new Set([
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'what', 'when', 'where',
+    'which', 'about', 'into', 'over', 'under', 'than', 'have', 'has', 'had', 'are',
+    'was', 'were', 'will', 'would', 'could', 'should', 'can', 'you', 'your', 'our',
+    'how', 'why', 'who', 'their', 'them', 'they', 'its', 'also', 'across', 'among',
+    'amid', 'after', 'before', 'does', 'did', 'done', 'been', 'show', 'tell', 'give',
+    'explain', 'summarize', 'compare'
+  ]);
+
+  const terms = input
+    .toLowerCase()
+    .replace(/[^\w\s/-]/g, ' ')
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 3 && !stopwords.has(term))
+    .slice(0, 8);
+
+  if (terms.length === 0) return '';
+  return terms.map((term) => `"${term}"*`).join(' OR ');
+}
+
 export async function POST(request: Request) {
   const { messages, paperIds } = await request.json();
   const db = await getDb();
 
-  let papers: any[] = [];
+  type PaperContextRow = {
+    id: number;
+    title: string | null;
+    authors: string | null;
+    publisher: string | null;
+    published_date: string | null;
+    abstract: string | null;
+    key_findings: string | null;
+  };
+
+  let papers: PaperContextRow[] = [];
+  const userMessage = messages[messages.length - 1]?.content || '';
 
   if (paperIds && paperIds.length > 0) {
     // Use specifically selected papers
@@ -23,13 +56,40 @@ export async function POST(request: Request) {
       paperIds
     );
   } else {
-    // Auto-load ALL approved papers when nothing is selected
-    papers = await db.all(
-      `SELECT id, title, authors, publisher, published_date, abstract, key_findings FROM papers WHERE status = 'approved'`
-    );
+    // Retrieval mode for scale: pull top relevant papers, not the whole library.
+    const ftsQuery = buildFtsQuery(userMessage);
+
+    if (ftsQuery) {
+      try {
+        papers = await db.all(
+          `
+            SELECT p.id, p.title, p.authors, p.publisher, p.published_date, p.abstract, p.key_findings
+            FROM papers_fts f
+            JOIN papers p ON p.id = f.rowid
+            WHERE p.status = 'approved'
+              AND f MATCH ?
+            ORDER BY p.created_at DESC
+            LIMIT 18
+          `,
+          [ftsQuery]
+        );
+      } catch (err) {
+        console.warn('FTS retrieval failed, falling back to recency.', err);
+      }
+    }
+
+    if (papers.length === 0) {
+      papers = await db.all(
+        `SELECT id, title, authors, publisher, published_date, abstract, key_findings
+         FROM papers
+         WHERE status = 'approved'
+         ORDER BY created_at DESC
+         LIMIT 12`
+      );
+    }
   }
 
-  const context = papers.map((p: any) => {
+  const context = papers.map((p) => {
     const authors = p.authors ? JSON.parse(p.authors) : [];
     const keyFindings = p.key_findings ? JSON.parse(p.key_findings) : [];
     return `
@@ -49,9 +109,7 @@ ${keyFindings.map((f: string, i: number) => `${i+1}. ${f}`).join('\n')}
   const paperCount = papers.length;
   const selectedNote = paperIds?.length > 0 
     ? `${paperCount} selected papers` 
-    : `${paperCount} most recent approved papers from the library`;
-
-  const userMessage = messages[messages.length - 1].content;
+    : `${paperCount} retrieved approved papers from the library (relevance + recency)`;
   const systemPrompt = `You are a research assistant for a financial research paper library.
 You have access to ${selectedNote}. Answer questions STRICTLY based on the content of these papers.
 If you cannot find the answer in the papers, say "Based on the ${paperCount} papers in context, I cannot find specific information about this. The papers available are: [list titles]."

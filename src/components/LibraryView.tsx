@@ -1,15 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { FileText, MessageSquare, ExternalLink, Loader2, Calendar, Building2, Layers, Users, Check } from 'lucide-react';
+import { MessageSquare, ExternalLink, Loader2, Check } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
-import Link from 'next/link';
-
 interface Paper {
   id: number;
   title: string;
@@ -23,10 +21,10 @@ interface Paper {
   filename: string;
 }
 
-const renderValue = (v: any): string => {
+const renderValue = (v: unknown): string => {
   if (v === null || v === undefined) return '';
   if (typeof v === 'object') {
-    return Object.entries(v)
+    return Object.entries(v as Record<string, unknown>)
       .map(([subK, subV]) => `${subK}: ${subV}`)
       .join(', ');
   }
@@ -40,35 +38,41 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
   onOpenViewer?: (id: number) => void,
   searchQuery?: string
 }) {
+  const PAGE_SIZE = 40;
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
 
-  // Use memoized filtered papers
-  const filteredPapers = React.useMemo(() => {
-    if (!searchQuery.trim()) return papers;
-    const q = searchQuery.toLowerCase();
-    return papers.filter(p => 
-      p.title?.toLowerCase().includes(q) ||
-      (p.authors || []).some(a => a.toLowerCase().includes(q)) ||
-      p.publisher?.toLowerCase().includes(q) ||
-      (p.tags || []).some(t => t.toLowerCase().includes(q)) ||
-      p.published_date?.toLowerCase().includes(q) ||
-      p.filename?.toLowerCase().includes(q)
-    );
-  }, [papers, searchQuery]);
-
-  const fetchPapers = async () => {
-    setLoading(true);
-    const res = await fetch('/api/papers?status=approved');
+  const fetchPapers = async ({ nextOffset, append, query }: { nextOffset: number; append: boolean; query: string }) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
+    const params = new URLSearchParams({
+      status: 'approved',
+      limit: String(PAGE_SIZE),
+      offset: String(nextOffset),
+    });
+    if (query.trim()) params.set('q', query.trim());
+    const res = await fetch(`/api/papers?${params.toString()}`);
     const data = await res.json();
-    setPapers(data);
+    const incoming = Array.isArray(data?.items) ? data.items : [];
+    setPapers((prev) => (append ? [...prev, ...incoming] : incoming));
+    setOffset(nextOffset);
+    setHasMore(Boolean(data?.hasMore));
+    setTotal(Number(data?.total || incoming.length));
     setLoading(false);
+    setLoadingMore(false);
   };
 
   useEffect(() => {
-    fetchPapers();
-  }, []);
+    const timeoutId = setTimeout(() => {
+      void fetchPapers({ nextOffset: 0, append: false, query: searchQuery });
+    }, 250);
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
 
   const toggleSelect = (id: number) => {
     const newSelected = selected.includes(id) 
@@ -102,7 +106,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
       )}
 
       <div className="flex flex-col gap-6">
-        {filteredPapers.map((paper) => (
+        {papers.map((paper) => (
           <div 
             key={paper.id} 
             onClick={() => handleCardClick(paper.id)}
@@ -177,6 +181,21 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
             </div>
           </div>
         ))}
+      </div>
+      <div className="flex items-center justify-between pt-2">
+        <p className="text-xs text-slate-400 font-semibold">
+          Showing {papers.length} of {total} papers
+        </p>
+        {hasMore && (
+          <button
+            onClick={() => void fetchPapers({ nextOffset: offset + PAGE_SIZE, append: true, query: searchQuery })}
+            disabled={loadingMore}
+            className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-violet-600 hover:border-violet-300 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+          >
+            {loadingMore ? <Loader2 size={14} className="animate-spin" /> : null}
+            Load More
+          </button>
+        )}
       </div>
     </div>
   );

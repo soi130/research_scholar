@@ -1,13 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Check, Edit3, Save, X, Loader2, Sparkles, Plus, Tag as TagIcon, Eye, Building2, Calendar, ExternalLink, RefreshCw } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { Check, Edit3, Save, X, Loader2, Sparkles, Plus, Tag as TagIcon, Eye, Building2, Calendar } from 'lucide-react';
 
 interface Paper {
   id: number;
@@ -20,14 +14,14 @@ interface Paper {
   abstract: string;
   tags: string[];
   key_findings: string[];
-  forecasts: Record<string, any>;
+  forecasts: Record<string, unknown>;
   status: string;
 }
 
-const renderValue = (v: any): string => {
+const renderValue = (v: unknown): string => {
   if (v === null || v === undefined) return '';
   if (typeof v === 'object') {
-    return Object.entries(v)
+    return Object.entries(v as Record<string, unknown>)
       .map(([subK, subV]) => `${subK}: ${subV}`)
       .join(', ');
   }
@@ -37,34 +31,37 @@ const renderValue = (v: any): string => {
 import PdfThumbnail from './PdfThumbnail';
 
 export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenViewer?: (id: number) => void, searchQuery?: string }) {
+  const PAGE_SIZE = 30;
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Partial<Paper>>({});
   const [masterTags, setMasterTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [tagInputValue, setTagInputValue] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
 
-  // Use memoized filtered papers for the review grid
-  const filteredPapers = React.useMemo(() => {
-    if (!searchQuery.trim()) return papers;
-    const q = searchQuery.toLowerCase();
-    return papers.filter(p => 
-      p.title?.toLowerCase().includes(q) ||
-      (p.authors || []).some(a => a.toLowerCase().includes(q)) ||
-      p.publisher?.toLowerCase().includes(q) ||
-      (p.tags || []).some(t => t.toLowerCase().includes(q)) ||
-      p.published_date?.toLowerCase().includes(q) ||
-      p.filename?.toLowerCase().includes(q)
-    );
-  }, [papers, searchQuery]);
-
-  const fetchPending = async () => {
-    setLoading(true);
-    const res = await fetch('/api/papers?status=pending');
+  const fetchPending = async ({ nextOffset, append, query }: { nextOffset: number; append: boolean; query: string }) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
+    const params = new URLSearchParams({
+      status: 'pending',
+      limit: String(PAGE_SIZE),
+      offset: String(nextOffset),
+    });
+    if (query.trim()) params.set('q', query.trim());
+    const res = await fetch(`/api/papers?${params.toString()}`);
     const data = await res.json();
-    setPapers(data);
+    const incoming = Array.isArray(data?.items) ? data.items : [];
+    setPapers((prev) => (append ? [...prev, ...incoming] : incoming));
+    setOffset(nextOffset);
+    setHasMore(Boolean(data?.hasMore));
+    setTotal(Number(data?.total || incoming.length));
     setLoading(false);
+    setLoadingMore(false);
   };
 
   const fetchTags = async () => {
@@ -74,13 +71,18 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
   };
 
   useEffect(() => {
-    fetchPending();
-    fetchTags();
-  }, []);
+    const timeoutId = setTimeout(() => {
+      void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
+    }, 250);
+    void (async () => {
+      await fetchTags();
+    })();
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
 
   const handleApprove = async (id: number) => {
     await fetch(`/api/papers/${id}`, { method: 'POST' });
-    fetchPending();
+    void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
   };
 
   const handleSave = async (id: number) => {
@@ -90,7 +92,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
       body: JSON.stringify(editValues)
     });
     setEditingId(null);
-    fetchPending();
+    void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
   };
 
   const handleAddMasterTag = async () => {
@@ -113,12 +115,12 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
   };
 
   const handleApproveAll = async () => {
-    if (!window.confirm(`Are you sure you want to approve all ${filteredPapers.length} filtered papers in the queue?`)) return;
+    if (!window.confirm(`Are you sure you want to approve all ${papers.length} currently loaded papers in the queue?`)) return;
     setLoading(true);
-    for (const p of filteredPapers) {
+    for (const p of papers) {
       await fetch(`/api/papers/${p.id}`, { method: 'POST' });
     }
-    fetchPending();
+    void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
   };
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-violet-500 w-10 h-10" /></div>;
@@ -169,7 +171,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
         </div>
 
         {/* Bulk Actions */}
-        {filteredPapers.length > 0 && (
+        {papers.length > 0 && (
           <div className="glass p-6 rounded-3xl border border-slate-200/50 flex items-center shadow-lg shadow-slate-200/20 flex-shrink-0">
             <button 
               onClick={handleApproveAll}
@@ -182,7 +184,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
       </div>
 
       <div className="flex flex-col gap-8">
-        {filteredPapers.map((paper) => (
+        {papers.map((paper) => (
           <div key={paper.id} className="glass group relative p-6 rounded-[2.5rem] border border-slate-200/50 hover:border-violet-500/30 hover:bg-white transition-all duration-500 shadow-sm hover:shadow-2xl hover:shadow-violet-500/5 flex gap-8 items-center overflow-hidden">
             
             {/* 1st Page Preview (List Mode) */}
@@ -346,6 +348,21 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
             </div>
           </div>
         ))}
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-slate-400 font-semibold">
+          Showing {papers.length} of {total} pending papers
+        </p>
+        {hasMore && (
+          <button
+            onClick={() => void fetchPending({ nextOffset: offset + PAGE_SIZE, append: true, query: searchQuery })}
+            disabled={loadingMore}
+            className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-violet-600 hover:border-violet-300 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+          >
+            {loadingMore ? <Loader2 size={14} className="animate-spin" /> : null}
+            Load More
+          </button>
+        )}
       </div>
     </div>
   );
