@@ -10,17 +10,80 @@ interface Message {
   content: string;
 }
 
+interface PaperRef {
+  id: number;
+  title: string;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelection, onOpenLibrary }: { selectedPaperIds: number[], onOpenViewer?: (id: number) => void, onClearSelection?: () => void, onOpenLibrary?: () => void }) {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Hello! I'm your research assistant. I have access to your entire approved paper library, or you can select specific papers to focus on. How can I help you today?" }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [paperIndex, setPaperIndex] = useState<PaperRef[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPaperIndex() {
+      try {
+        const res = await fetch('/api/papers?status=approved&limit=500');
+        const data = await res.json();
+        if (!active) return;
+        const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+        setPaperIndex(
+          items
+            .map((paper: { id?: number; title?: string }) => ({
+              id: Number(paper.id),
+              title: String(paper.title || '').trim(),
+            }))
+            .filter((paper: PaperRef) => Number.isFinite(paper.id) && paper.title.length > 0)
+        );
+      } catch {
+        if (active) setPaperIndex([]);
+      }
+    }
+
+    void loadPaperIndex();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const linkifyPaperTitles = (content: string) => {
+    if (paperIndex.length === 0) return content;
+
+    const preservedLinks: string[] = [];
+    let nextContent = content.replace(/\[([^\]]+)\]\((?:paper:\/\/|\/paper\/)(\d+)\)/g, (match) => {
+      const token = `__PAPER_LINK_${preservedLinks.length}__`;
+      preservedLinks.push(match);
+      return token;
+    });
+
+    const sortedPapers = [...paperIndex].sort((a, b) => b.title.length - a.title.length);
+
+    for (const paper of sortedPapers) {
+      const pattern = new RegExp(`\\b${escapeRegExp(paper.title)}\\b`, 'gi');
+      nextContent = nextContent.replace(pattern, (match) => `[${match}](/paper/${paper.id})`);
+    }
+
+    preservedLinks.forEach((link, index) => {
+      nextContent = nextContent.replace(`__PAPER_LINK_${index}__`, link);
+    });
+
+    return nextContent;
+  };
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -41,7 +104,7 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
       });
       const data = await res.json();
       setMessages(prev => [...prev, data]);
-    } catch (err) {
+    } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I encountered an error processing your request." }]);
     } finally {
       setLoading(false);
@@ -49,15 +112,15 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
   };
 
   return (
-    <div className="flex flex-col h-[70vh] bg-white rounded-[2.5rem] border border-slate-200/50 overflow-hidden relative shadow-2xl shadow-slate-200/50">
+    <div className="flex flex-col h-[70vh] bg-[var(--surface-strong)] rounded-[2.5rem] border border-[color:var(--border)] overflow-hidden relative shadow-2xl shadow-slate-200/50">
       {/* Background Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-violet-500/5 blur-[100px] pointer-events-none" />
       
       {/* Header */}
-      <div className="h-14 border-b border-slate-100 flex items-center px-6 justify-between bg-white/50 backdrop-blur-md sticky top-0 z-10 flex-shrink-0">
+      <div className="h-14 border-b border-[color:var(--border)] flex items-center px-6 justify-between bg-[var(--surface)] backdrop-blur-md sticky top-0 z-10 flex-shrink-0">
          <div className="flex items-center gap-2">
            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Research Co-Pilot</span>
+           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Scholar.AI</span>
          </div>
          <button onClick={() => setMessages([{ role: 'assistant', content: "Hello! History cleared. How can I help you navigate the library?" }])} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
            <Eraser size={14} />
@@ -65,15 +128,15 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
       </div>
 
       {/* Context Selection Bar */}
-      <div className="bg-slate-50 border-b border-slate-100/80 px-6 py-2 flex flex-wrap items-center justify-between gap-4 z-10 flex-shrink-0">
+      <div className="bg-[var(--surface-soft)] border-b border-[color:var(--border)]/80 px-6 py-2 flex flex-wrap items-center justify-between gap-4 z-10 flex-shrink-0">
         <div className="flex items-center gap-2">
            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Context:</span>
            {selectedPaperIds.length > 0 ? (
-             <span className="text-[10px] font-black text-violet-700 bg-violet-100 border border-violet-200 px-2 py-1 rounded-md shadow-sm">
+             <span className="text-[10px] font-black text-[var(--foreground)] bg-[var(--accent-soft)] border border-[color:var(--border-strong)] px-2 py-1 rounded-md shadow-sm">
                {selectedPaperIds.length} Paper{selectedPaperIds.length > 1 ? 's' : ''} Selected
              </span>
            ) : (
-             <span className="text-[10px] font-black text-slate-700 bg-slate-200 border border-slate-300 px-2 py-1 rounded-md shadow-sm">
+             <span className="text-[10px] font-black text-[var(--foreground)] bg-[var(--surface-muted)] border border-[color:var(--border)] px-2 py-1 rounded-md shadow-sm">
                Global Library (All Approved Papers)
              </span>
            )}
@@ -106,7 +169,7 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
             <div className={`max-w-[85%] overflow-x-auto p-4 rounded-3xl text-sm leading-relaxed shadow-sm ${
               m.role === 'user' 
                 ? 'bg-violet-600 text-white rounded-tr-none font-medium' 
-                : 'bg-slate-50 text-slate-900 rounded-tl-none border border-slate-100'
+                : 'bg-[var(--surface-soft)] text-slate-900 rounded-tl-none border border-[color:var(--border)]'
             }`}>
               {m.role === 'user' ? (
                 m.content
@@ -114,21 +177,34 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
                 <ReactMarkdown 
                   remarkPlugins={[remarkGfm]}
                   components={{
-                    ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
-                    ol: ({node, ...props}) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
-                    li: ({node, ...props}) => <li className="" {...props} />,
-                    table: ({node, ...props}) => <div className="overflow-x-auto my-4 rounded-xl border border-slate-200"><table className="w-full text-left border-collapse text-xs" {...props} /></div>,
-                    th: ({node, ...props}) => <th className="bg-slate-100/50 border-b-2 border-slate-200 p-3 font-bold text-slate-700 whitespace-nowrap" {...props} />,
-                    td: ({node, ...props}) => <td className="border-b border-slate-100 p-3 bg-white" {...props} />,
-                    p: ({node, ...props}) => <p className="mb-3 last:mb-0" {...props} />,
-                    a: ({node, href, children, ...props}) => {
-                      if (href?.startsWith('paper://')) {
-                        const id = parseInt(href.replace('paper://', ''), 10);
+                    ul: (props) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
+                    ol: (props) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
+                    li: (props) => <li className="" {...props} />,
+                    table: (props) => <div className="overflow-x-auto my-4 rounded-xl border border-slate-200"><table className="w-full text-left border-collapse text-xs" {...props} /></div>,
+                    th: (props) => <th className="bg-slate-100/50 border-b-2 border-slate-200 p-3 font-bold text-slate-700 whitespace-nowrap" {...props} />,
+                    td: (props) => <td className="border-b border-slate-100 p-3 bg-white" {...props} />,
+                    p: (props) => <p className="mb-3 last:mb-0" {...props} />,
+                    a: ({ href, children, ...props }) => {
+                      const paperMatch = href?.match(/^(?:paper:\/\/|\/paper\/)(\d+)$/);
+                      if (paperMatch) {
+                        const id = parseInt(paperMatch[1], 10);
+                        if (!Number.isFinite(id)) {
+                          return <span className="text-violet-600 font-bold" {...props}>{children}</span>;
+                        }
                         return (
                           <button 
-                            onClick={() => onOpenViewer?.(id)}
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onOpenViewer?.(id);
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
                             title="Open PDF Document"
-                            className="inline-flex items-center gap-1 text-violet-600 hover:text-violet-700 font-bold bg-violet-100 hover:bg-violet-200 px-1.5 py-0.5 rounded-md transition-colors leading-none mx-0.5 align-baseline"
+                            className="inline-flex items-center gap-1 text-violet-700 hover:text-violet-800 font-bold bg-[var(--accent-soft)] hover:bg-[color:var(--border-strong)] px-1.5 py-0.5 rounded-md transition-colors leading-none mx-0.5 align-baseline cursor-pointer"
                           >
                             {children}
                           </button>
@@ -136,13 +212,13 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
                       }
                       return <a href={href} className="text-violet-600 hover:text-violet-700 underline underline-offset-2 font-medium" {...props}>{children}</a>
                     },
-                    strong: ({node, ...props}) => <strong className="font-bold text-violet-900" {...props} />,
-                    h1: ({node, ...props}) => <h1 className="text-lg font-black text-slate-900 mt-4 mb-2" {...props} />,
-                    h2: ({node, ...props}) => <h2 className="text-base font-bold text-slate-900 mt-3 mb-2" {...props} />,
-                    h3: ({node, ...props}) => <h3 className="text-sm font-bold text-slate-800 mt-2 mb-1" {...props} />,
+                    strong: (props) => <strong className="font-bold text-violet-900" {...props} />,
+                    h1: (props) => <h1 className="text-lg font-black text-slate-900 mt-4 mb-2" {...props} />,
+                    h2: (props) => <h2 className="text-base font-bold text-slate-900 mt-3 mb-2" {...props} />,
+                    h3: (props) => <h3 className="text-sm font-bold text-slate-800 mt-2 mb-1" {...props} />,
                   }}
                 >
-                  {m.content}
+                  {m.role === 'assistant' ? linkifyPaperTitles(m.content) : m.content}
                 </ReactMarkdown>
               )}
             </div>
@@ -153,16 +229,16 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200/50">
               <Bot size={14} className="text-violet-400" />
             </div>
-            <div className="bg-slate-50 p-4 rounded-3xl rounded-tl-none border border-slate-100">
+            <div className="bg-[var(--surface-soft)] p-4 rounded-3xl rounded-tl-none border border-[color:var(--border)]">
               <Loader2 className="animate-spin text-violet-400" size={16} />
             </div>
           </div>
         )}
       </div>
-      <div className="h-10 bg-gradient-to-t from-white to-transparent absolute bottom-[88px] left-0 right-0 pointer-events-none" />
+      <div className="h-10 bg-gradient-to-t from-[var(--surface-strong)] to-transparent absolute bottom-[88px] left-0 right-0 pointer-events-none" />
 
       {/* Input Area */}
-      <div className="p-5 bg-white border-t border-slate-200/50">
+      <div className="p-5 bg-[var(--surface-strong)] border-t border-[color:var(--border)]">
         <div className="relative flex items-center">
           <input 
             type="text"
@@ -170,7 +246,7 @@ export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelec
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
             placeholder={selectedPaperIds.length > 0 ? `Ask about these ${selectedPaperIds.length} papers...` : "Ask the AI about your entire library..."}
-            className="w-full bg-slate-100/50 border border-slate-200/50 rounded-2xl py-3.5 pl-5 pr-14 outline-none focus:border-violet-500/30 focus:bg-white focus:ring-4 focus:ring-violet-500/5 transition-all text-sm text-slate-900 placeholder:text-slate-400"
+            className="w-full bg-[var(--surface-muted)] border border-[color:var(--border)] rounded-2xl py-3.5 pl-5 pr-14 outline-none focus:border-violet-500/30 focus:bg-[var(--surface-strong)] focus:ring-4 focus:ring-violet-500/5 transition-all text-sm text-slate-900 placeholder:text-slate-400"
           />
           <button 
             onClick={handleSend}

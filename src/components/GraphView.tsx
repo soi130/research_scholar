@@ -1,17 +1,23 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Minus,
   ArrowUpRight,
   Building2,
+  CalendarClock,
   CircleDot,
   FileText,
   Loader2,
   Layers3,
+  Maximize2,
+  Minimize2,
   Search,
   Share2,
+  Sparkles,
   Tag,
   User,
+  X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -37,6 +43,8 @@ type NodePoint = GraphNode & {
   vx: number;
   vy: number;
 };
+
+type TimeWindow = 'all' | '3m' | '6m' | '1y' | '2y';
 
 function stableHash(value: string): number {
   let hash = 0;
@@ -184,7 +192,7 @@ function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], width = 1400, heigh
     })
     .filter(Boolean) as Array<{ source: NodePoint; target: NodePoint; weight: number }>;
 
-  const iterations = Math.min(180, Math.max(90, 30 + nodes.length * 2));
+  const iterations = Math.min(110, Math.max(50, 18 + nodes.length));
   for (let i = 0; i < iterations; i += 1) {
     for (let a = 0; a < nodes.length; a += 1) {
       const pointA = points.get(nodes[a].id);
@@ -251,9 +259,21 @@ export default function GraphView({
   onOpenViewer?: (id: number) => void;
 }) {
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [topicInput, setTopicInput] = useState('');
+  const [selectedTag, setSelectedTag] = useState('');
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [focusLabel, setFocusLabel] = useState('Pick a tag or topic to build a focused map.');
+  const [focusReady, setFocusReady] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [graphSpread, setGraphSpread] = useState(1);
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('1y');
+  const [asOfDate, setAsOfDate] = useState<string>('');
+  const [activeFocus, setActiveFocus] = useState<{ query: string; tag: string }>({ query: '', tag: '' });
   const [typeFilter, setTypeFilter] = useState<Record<GraphNodeType, boolean>>({
     paper: true,
     author: true,
@@ -261,30 +281,166 @@ export default function GraphView({
     publisher: true,
     series: true,
   });
+  const panStateRef = useRef<{
+    active: boolean;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  }>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+  });
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const graphShellRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    async function loadGraph() {
-      setLoading(true);
+    async function loadTags() {
       try {
-        const res = await fetch('/api/graph?status=approved');
+        const res = await fetch('/api/tags');
         const data = await res.json();
         if (!active) return;
-        setGraph(data);
+        setAvailableTags(Array.isArray(data) ? data.slice(0, 24) : []);
       } catch {
-        if (active) setGraph(null);
-      } finally {
-        if (active) setLoading(false);
+        if (active) setAvailableTags([]);
       }
     }
 
-    void loadGraph();
+    void loadTags();
 
     return () => {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const today = new Date();
+    setAsOfDate(today.toISOString().slice(0, 10));
+  }, []);
+
+  const computeTemporalRange = () => {
+    if (!asOfDate) {
+      return { from: '', to: '', asOf: '' };
+    }
+
+    if (timeWindow === 'all') {
+      return { from: '', to: '', asOf: asOfDate };
+    }
+
+    const asOf = new Date(asOfDate);
+    if (Number.isNaN(asOf.getTime())) {
+      return { from: '', to: '', asOf: '' };
+    }
+
+    const from = new Date(asOf.getTime());
+    if (timeWindow === '3m') from.setMonth(from.getMonth() - 3);
+    if (timeWindow === '6m') from.setMonth(from.getMonth() - 6);
+    if (timeWindow === '1y') from.setFullYear(from.getFullYear() - 1);
+    if (timeWindow === '2y') from.setFullYear(from.getFullYear() - 2);
+
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: asOfDate,
+      asOf: asOfDate,
+    };
+  };
+
+  const loadFocusedGraph = async ({ query, tag }: { query: string; tag: string }) => {
+    const trimmedQuery = query.trim();
+    const trimmedTag = tag.trim();
+
+    if (!trimmedQuery && !trimmedTag) {
+      setGraph(null);
+      setFocusReady(false);
+      setFocusLabel('Pick a tag or topic to build a focused map.');
+      setActiveFocus({ query: '', tag: '' });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      status: 'approved',
+      limit: '140',
+    });
+
+    if (trimmedQuery) params.set('q', trimmedQuery);
+    if (trimmedTag) params.set('tag', trimmedTag);
+    const temporal = computeTemporalRange();
+    if (temporal.from) params.set('from', temporal.from);
+    if (temporal.to) params.set('to', temporal.to);
+    if (temporal.asOf) params.set('asOf', temporal.asOf);
+
+    setLoading(true);
+    setFocusReady(true);
+    setActiveFocus({ query: trimmedQuery, tag: trimmedTag });
+    const focusBase = trimmedTag ? `Focused on tag "${trimmedTag}"` : `Focused on topic "${trimmedQuery}"`;
+    const rangeLabel =
+      timeWindow === 'all'
+        ? asOfDate
+          ? `as of ${asOfDate}`
+          : 'all history'
+        : asOfDate
+          ? `${timeWindow.toUpperCase()} window (as of ${asOfDate})`
+          : `${timeWindow.toUpperCase()} window`;
+    setFocusLabel(`${focusBase} • ${rangeLabel}`);
+
+    try {
+      const res = await fetch(`/api/graph?${params.toString()}`);
+      const data = await res.json();
+      if (data?.focusRequired) {
+        setGraph(null);
+        setFocusReady(false);
+        setFocusLabel('Pick a tag or topic to build a focused map.');
+      } else {
+        setGraph(data);
+      }
+    } catch {
+      setGraph(null);
+      setFocusReady(false);
+      setFocusLabel('Unable to load graph right now.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBuildGraph = () => {
+    void loadFocusedGraph({ query: topicInput, tag: selectedTag });
+  };
+
+  const handleTagSelect = (tag: string) => {
+    setSelectedTag(tag);
+    setTopicInput('');
+    void loadFocusedGraph({ query: '', tag });
+  };
+
+  const handleClearFocus = () => {
+    setSelectedTag('');
+    setTopicInput('');
+    setGraph(null);
+    setFocusReady(false);
+    setFocusLabel('Pick a tag or topic to build a focused map.');
+    setActiveFocus({ query: '', tag: '' });
+  };
+
+  useEffect(() => {
+    if (!activeFocus.query && !activeFocus.tag) return;
+    if (!asOfDate) return;
+    void loadFocusedGraph(activeFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeWindow, asOfDate]);
 
   const derived = useMemo(() => {
     if (!graph) {
@@ -299,7 +455,11 @@ export default function GraphView({
     }
 
     const visible = buildVisibleGraph(graph, searchQuery, typeFilter);
-    const layout = layoutGraph(visible.nodes, visible.edges);
+    const layout = layoutGraph(visible.nodes, visible.edges).map((node) => ({
+      ...node,
+      x: 700 + (node.x - 700) * graphSpread,
+      y: 450 + (node.y - 450) * graphSpread,
+    }));
     const adjacency = buildAdjacency(visible.edges);
 
     return {
@@ -307,7 +467,7 @@ export default function GraphView({
       layout,
       adjacency,
     };
-  }, [graph, searchQuery, typeFilter]);
+  }, [graph, searchQuery, typeFilter, graphSpread]);
 
   useEffect(() => {
     if (selectedNodeId && !derived.nodes.some((node) => node.id === selectedNodeId)) {
@@ -331,11 +491,106 @@ export default function GraphView({
 
   const nodeCount = derived.nodes.length;
   const edgeCount = derived.edges.length;
+  const viewportLabel = `${Math.round(viewport.zoom * 100)}%`;
+  const labelScale = Math.max(0.78, Math.min(1.12, 1 / Math.sqrt(Math.max(viewport.zoom, 0.85))));
 
   const labelForType = (type: GraphNodeType) => NODE_META[type].label;
 
+  const clampZoom = (value: number) => Math.min(2.5, Math.max(0.4, value));
+
+  const getPointerInViewBox = (event: React.PointerEvent<SVGSVGElement>) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 1400;
+    const y = ((event.clientY - rect.top) / rect.height) * 900;
+    return { x, y };
+  };
+
+  const handleWheel = (event: React.WheelEvent<SVGSVGElement>) => {
+    event.preventDefault();
+    const svgPoint = getPointerInViewBox(event);
+    const zoomFactor = event.deltaY > 0 ? 0.92 : 1.08;
+    setViewport((current) => {
+      const nextZoom = clampZoom(current.zoom * zoomFactor);
+      const worldX = (svgPoint.x - current.x) / current.zoom;
+      const worldY = (svgPoint.y - current.y) / current.zoom;
+      return {
+        zoom: nextZoom,
+        x: svgPoint.x - worldX * nextZoom,
+        y: svgPoint.y - worldY * nextZoom,
+      };
+    });
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-graph-node="true"]')) {
+      return;
+    }
+
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    svg.setPointerCapture(event.pointerId);
+    panStateRef.current = {
+      active: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewport.x,
+      originY: viewport.y,
+    };
+    setIsPanning(true);
+    setSelectedNodeId(null);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!panStateRef.current.active) return;
+
+    const dx = event.clientX - panStateRef.current.startX;
+    const dy = event.clientY - panStateRef.current.startY;
+    setViewport((current) => ({
+      ...current,
+      x: panStateRef.current.originX + dx,
+      y: panStateRef.current.originY + dy,
+    }));
+  };
+
+  const endPointerInteraction = (event: React.PointerEvent<SVGSVGElement>) => {
+    const svg = svgRef.current;
+    if (svg && svg.hasPointerCapture(event.pointerId)) {
+      svg.releasePointerCapture(event.pointerId);
+    }
+    panStateRef.current.active = false;
+    setIsPanning(false);
+  };
+
+  const resetViewport = () => setViewport({ x: 0, y: 0, zoom: 1 });
+  const zoomBy = (factor: number) => {
+    setViewport((current) => ({ ...current, zoom: clampZoom(current.zoom * factor) }));
+  };
+
+  const toggleFullscreen = async () => {
+    const el = graphShellRef.current;
+    if (!el) return;
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await el.requestFullscreen();
+  };
+
   return (
-    <div className="h-[78vh] min-h-[680px] rounded-[2.5rem] overflow-hidden border border-slate-800/80 bg-slate-950 text-slate-100 shadow-2xl shadow-slate-900/20 relative">
+    <div
+      ref={graphShellRef}
+      className={cn(
+        'h-[78vh] min-h-[680px] rounded-[2.5rem] overflow-hidden border border-slate-800/80 bg-slate-950 text-slate-100 shadow-2xl shadow-slate-900/20 relative',
+        isFullscreen ? 'rounded-none h-screen min-h-0' : ''
+      )}
+    >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(125,211,252,0.12),transparent_28%),radial-gradient(circle_at_top_right,rgba(196,181,253,0.10),transparent_24%),linear-gradient(180deg,rgba(15,23,42,0.98),rgba(2,6,23,1))]" />
       <div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(255,255,255,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:36px_36px]" />
 
@@ -372,36 +627,175 @@ export default function GraphView({
             </div>
           </div>
 
-          <div className="px-5 py-4 border-b border-white/10 bg-slate-950/40 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mr-2">Node Types</span>
-            {NODE_ORDER.map((type) => {
-              const meta = NODE_META[type];
-              const active = typeFilter[type];
-              const Icon = meta.icon;
-              return (
-                <button
-                  key={type}
-                  onClick={() => setTypeFilter((prev) => ({ ...prev, [type]: !prev[type] }))}
-                  className={cn(
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all',
-                    active
-                      ? 'border-white/15 bg-white/10 text-white shadow-lg shadow-black/10'
-                      : 'border-white/10 bg-transparent text-slate-500'
-                  )}
-                >
-                  <Icon size={13} className={active ? meta.color : 'text-slate-500'} />
-                  {meta.label}
-                </button>
-              );
-            })}
+          <div className="px-5 py-4 border-b border-white/10 bg-slate-950/40 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1 max-w-xl">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                <input
+                  value={topicInput}
+                  onChange={(e) => setTopicInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleBuildGraph();
+                  }}
+                  placeholder="Search a topic, company, macro theme, or keyword"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 py-2.5 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-sky-300/30 focus:bg-white/10 transition-all"
+                />
+              </div>
+              <button
+                onClick={handleBuildGraph}
+                className="inline-flex items-center gap-2 rounded-2xl bg-sky-400 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-sky-300 transition-colors"
+              >
+                <Sparkles size={15} />
+                Build Graph
+              </button>
+              <button
+                onClick={handleClearFocus}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/10 transition-colors"
+              >
+                <X size={15} />
+                Clear
+              </button>
+            </div>
 
-            <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400">
-              <Search size={13} />
-              <span>{searchQuery.trim() ? `Filtering for "${searchQuery.trim()}"` : 'Use the global search bar to filter this map.'}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mr-2">Popular Tags</span>
+              {availableTags.length > 0 ? (
+                availableTags.slice(0, 16).map((tag) => {
+                  const active = selectedTag.toLowerCase() === tag.toLowerCase();
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => handleTagSelect(tag)}
+                      className={cn(
+                        'rounded-full border px-3 py-1.5 text-xs font-semibold transition-all',
+                        active
+                          ? 'border-sky-300/30 bg-sky-400/15 text-sky-100'
+                          : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                      )}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })
+              ) : (
+                <span className="text-xs text-slate-500">No tags loaded yet.</span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mr-2">
+                <CalendarClock size={12} />
+                Time Window
+              </span>
+              {[
+                { label: 'All', value: 'all' as const },
+                { label: '3M', value: '3m' as const },
+                { label: '6M', value: '6m' as const },
+                { label: '1Y', value: '1y' as const },
+                { label: '2Y', value: '2y' as const },
+              ].map((option) => {
+                const active = timeWindow === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => setTimeWindow(option.value)}
+                    className={cn(
+                      'rounded-full border px-3 py-1.5 text-xs font-semibold transition-all',
+                      active
+                        ? 'border-sky-300/30 bg-sky-400/15 text-sky-100'
+                        : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+              <div className="ml-2 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-1.5">
+                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-black">As Of</span>
+                <input
+                  type="date"
+                  value={asOfDate}
+                  onChange={(event) => setAsOfDate(event.target.value)}
+                  className="bg-transparent text-xs text-slate-200 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mr-2">Spacing</span>
+              {[
+                { label: 'Tight', value: 0.82 },
+                { label: 'Normal', value: 1 },
+                { label: 'Wide', value: 1.22 },
+                { label: 'Far', value: 1.45 },
+              ].map((preset) => {
+                const active = Math.abs(graphSpread - preset.value) < 0.01;
+                return (
+                  <button
+                    key={preset.label}
+                    onClick={() => setGraphSpread(preset.value)}
+                    className={cn(
+                      'rounded-full border px-3 py-1.5 text-xs font-semibold transition-all',
+                      active
+                        ? 'border-sky-300/30 bg-sky-400/15 text-sky-100'
+                        : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setGraphSpread(1)}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/10 transition-all"
+              >
+                Reset Spacing
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mr-2">Node Types</span>
+              {NODE_ORDER.map((type) => {
+                const meta = NODE_META[type];
+                const active = typeFilter[type];
+                const Icon = meta.icon;
+                return (
+                  <button
+                    key={type}
+                    onClick={() => setTypeFilter((prev) => ({ ...prev, [type]: !prev[type] }))}
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all',
+                      active
+                        ? 'border-white/15 bg-white/10 text-white shadow-lg shadow-black/10'
+                        : 'border-white/10 bg-transparent text-slate-500'
+                    )}
+                  >
+                    <Icon size={13} className={active ? meta.color : 'text-slate-500'} />
+                    {meta.label}
+                  </button>
+                );
+              })}
+
+              <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400">
+                <Search size={13} />
+                <span>{focusLabel}</span>
+              </div>
             </div>
           </div>
 
           <div className="relative flex-1 min-h-0">
+            {!focusReady && !loading && !graph && (
+              <div className="absolute inset-0 flex items-center justify-center p-10 text-center">
+                <div className="max-w-lg rounded-3xl border border-white/10 bg-white/5 px-8 py-10 shadow-2xl shadow-black/20">
+                  <CircleDot size={36} className="mx-auto text-sky-300 mb-5" />
+                  <h3 className="text-xl font-black text-white mb-2">Build a focused graph</h3>
+                  <p className="text-sm text-slate-400">
+                    Start with a topic or a tag to keep the graph fast. This loads only a relevant subset instead of the full library.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {loading && (
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
                 <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-300">
@@ -411,7 +805,7 @@ export default function GraphView({
               </div>
             )}
 
-            {!loading && derived.nodes.length === 0 && (
+            {!loading && graph && derived.nodes.length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center p-10 text-center">
                 <div className="max-w-md rounded-3xl border border-white/10 bg-white/5 px-8 py-10 shadow-2xl shadow-black/20">
                   <CircleDot size={36} className="mx-auto text-sky-300 mb-5" />
@@ -423,8 +817,18 @@ export default function GraphView({
               </div>
             )}
 
-            {!loading && derived.nodes.length > 0 && (
-              <svg viewBox="0 0 1400 900" className="w-full h-full block">
+            {!loading && graph && derived.nodes.length > 0 && (
+              <svg
+                ref={svgRef}
+                viewBox="0 0 1400 900"
+                className={cn('w-full h-full block touch-none select-none', isPanning ? 'cursor-grabbing' : 'cursor-grab')}
+                onWheel={handleWheel}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={endPointerInteraction}
+                onPointerCancel={endPointerInteraction}
+                onPointerLeave={endPointerInteraction}
+              >
                 <defs>
                   <filter id="nodeGlow" x="-40%" y="-40%" width="180%" height="180%">
                     <feGaussianBlur stdDeviation="8" result="blur" />
@@ -435,7 +839,7 @@ export default function GraphView({
                   </filter>
                 </defs>
 
-                <g>
+                <g transform={`matrix(${viewport.zoom} 0 0 ${viewport.zoom} ${viewport.x} ${viewport.y})`}>
                   {derived.edges.map((edge) => {
                     const source = derived.layout.find((node) => node.id === edge.source);
                     const target = derived.layout.find((node) => node.id === edge.target);
@@ -459,64 +863,99 @@ export default function GraphView({
                       />
                     );
                   })}
+
+                  {derived.layout.map((node) => {
+                    const selected = node.id === selectedNodeId;
+                    const hovered = node.id === hoveredNodeId;
+                    const matched = derived.matchingIds.has(node.id);
+                    const radius = getRadius(node);
+                    const fill = getFill(node, selected, hovered, matched);
+                    const stroke = getStroke(node, selected, hovered, matched);
+                    const paperConnected = node.type === 'paper' && selectedNodeId && selectedNodeId !== node.id && derived.adjacency.get(selectedNodeId)?.has(node.id);
+                    const labelVisible = node.type === 'paper' || hovered || selected || matched || node.count > 3 || viewport.zoom >= 0.85;
+
+                    return (
+                      <g
+                        key={node.id}
+                        transform={`translate(${node.x},${node.y})`}
+                        data-graph-node="true"
+                        onClick={() => {
+                          setSelectedNodeId(node.id);
+                          if (node.type === 'paper' && node.paperId) {
+                            onOpenViewer?.(node.paperId);
+                          }
+                        }}
+                        onMouseEnter={() => setHoveredNodeId(node.id)}
+                        onMouseLeave={() => setHoveredNodeId(null)}
+                        className="cursor-pointer"
+                      >
+                        <circle
+                          r={radius + (selected ? 6 : hovered ? 4 : matched ? 2 : 0)}
+                          fill={node.type === 'paper' ? 'rgba(125,211,252,0.08)' : 'rgba(255,255,255,0.04)'}
+                          stroke="rgba(255,255,255,0.05)"
+                          strokeWidth={1}
+                        />
+                        <circle
+                          r={radius}
+                          fill={fill}
+                          stroke={stroke}
+                          strokeWidth={selected ? 3 : hovered ? 2.2 : matched ? 2 : 1.2}
+                          filter={selected || hovered ? 'url(#nodeGlow)' : undefined}
+                          opacity={paperConnected ? 1 : 0.95}
+                        />
+                        <circle r={radius - 4} fill={node.type === 'paper' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.12)'} opacity={selected || hovered ? 0.55 : 0.28} />
+                        {labelVisible && (
+                          <text
+                            y={radius + 16}
+                            textAnchor="middle"
+                            fill="rgba(226,232,240,0.92)"
+                            fontSize={(node.type === 'paper' ? 12 : 10) * labelScale}
+                            fontWeight={node.type === 'paper' ? 700 : 600}
+                            className="select-none"
+                          >
+                            {node.label.length > 28 ? `${node.label.slice(0, 28)}…` : node.label}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
                 </g>
-
-                {derived.layout.map((node) => {
-                  const selected = node.id === selectedNodeId;
-                  const hovered = node.id === hoveredNodeId;
-                  const matched = derived.matchingIds.has(node.id);
-                  const radius = getRadius(node);
-                  const fill = getFill(node, selected, hovered, matched);
-                  const stroke = getStroke(node, selected, hovered, matched);
-                  const paperConnected = node.type === 'paper' && selectedNodeId && selectedNodeId !== node.id && derived.adjacency.get(selectedNodeId)?.has(node.id);
-                  const labelVisible = node.type === 'paper' || hovered || selected || matched || node.count > 3;
-
-                  return (
-                    <g
-                      key={node.id}
-                      transform={`translate(${node.x},${node.y})`}
-                      onClick={() => {
-                        setSelectedNodeId(node.id);
-                        if (node.type === 'paper' && node.paperId) {
-                          onOpenViewer?.(node.paperId);
-                        }
-                      }}
-                      onMouseEnter={() => setHoveredNodeId(node.id)}
-                      onMouseLeave={() => setHoveredNodeId(null)}
-                      className="cursor-pointer"
-                    >
-                      <circle
-                        r={radius + (selected ? 6 : hovered ? 4 : matched ? 2 : 0)}
-                        fill={node.type === 'paper' ? 'rgba(125,211,252,0.08)' : 'rgba(255,255,255,0.04)'}
-                        stroke="rgba(255,255,255,0.05)"
-                        strokeWidth={1}
-                      />
-                      <circle
-                        r={radius}
-                        fill={fill}
-                        stroke={stroke}
-                        strokeWidth={selected ? 3 : hovered ? 2.2 : matched ? 2 : 1.2}
-                        filter={selected || hovered ? 'url(#nodeGlow)' : undefined}
-                        opacity={paperConnected ? 1 : 0.95}
-                      />
-                      <circle r={radius - 4} fill={node.type === 'paper' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.12)'} opacity={selected || hovered ? 0.55 : 0.28} />
-                      {labelVisible && (
-                        <text
-                          y={radius + 16}
-                          textAnchor="middle"
-                          fill="rgba(226,232,240,0.92)"
-                          fontSize={node.type === 'paper' ? 12 : 10}
-                          fontWeight={node.type === 'paper' ? 700 : 600}
-                          className="select-none"
-                        >
-                          {node.label.length > 28 ? `${node.label.slice(0, 28)}…` : node.label}
-                        </text>
-                      )}
-                    </g>
-                  );
-                })}
               </svg>
             )}
+          </div>
+
+          <div className="absolute right-6 bottom-6 z-20 flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 backdrop-blur-md">
+            <button
+              onClick={() => zoomBy(1.12)}
+              className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 flex items-center justify-center transition-colors"
+              aria-label="Zoom in"
+            >
+              <span className="text-lg leading-none">+</span>
+            </button>
+            <button
+              onClick={() => zoomBy(0.89)}
+              className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 flex items-center justify-center transition-colors"
+              aria-label="Zoom out"
+            >
+              <Minus size={14} />
+            </button>
+            <button
+              onClick={resetViewport}
+              className="rounded-xl bg-white/5 hover:bg-white/10 px-3 h-8 text-xs font-semibold text-slate-200 transition-colors"
+            >
+              Reset
+            </button>
+            <button
+              onClick={() => void toggleFullscreen()}
+              className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 flex items-center justify-center transition-colors"
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            >
+              {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-black pl-2 border-l border-white/10">
+              {viewportLabel}
+            </span>
           </div>
         </div>
 
@@ -543,6 +982,12 @@ export default function GraphView({
                   <div className="rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2">
                     <p className="text-slate-500 uppercase tracking-[0.18em] text-[10px] font-black">Weight</p>
                     <p className="text-white font-black text-base">{selectedNode.count}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2 col-span-2">
+                    <p className="text-slate-500 uppercase tracking-[0.18em] text-[10px] font-black">As Of</p>
+                    <p className="text-white font-black text-base">
+                      {selectedNode.metadata.publishedDate || selectedNode.metadata.ingestedAt || 'Unknown'}
+                    </p>
                   </div>
                 </div>
 
@@ -572,17 +1017,17 @@ export default function GraphView({
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {selectedConnectedPapers.slice(0, 12).map((paper) => (
-                      <button
-                        key={paper.id}
-                        onClick={() => {
-                          setSelectedNodeId(paper.id);
-                          const paperId = paper.paperId ?? Number.parseInt(paper.id.replace('paper:', ''), 10);
-                          if (Number.isFinite(paperId)) {
-                            onOpenViewer?.(paperId);
-                          }
-                        }}
-                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/10 transition-colors max-w-full"
-                      >
+                        <button
+                          key={paper.id}
+                          onClick={() => {
+                            setSelectedNodeId(paper.id);
+                            const paperId = paper.paperId ?? Number.parseInt(paper.id.replace('paper:', ''), 10);
+                            if (Number.isFinite(paperId)) {
+                              onOpenViewer?.(paperId);
+                            }
+                          }}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/10 transition-colors max-w-full"
+                        >
                           {paper.label.length > 24 ? `${paper.label.slice(0, 24)}…` : paper.label}
                         </button>
                       ))}
@@ -592,7 +1037,7 @@ export default function GraphView({
               </>
             ) : (
               <p className="text-sm text-slate-400 leading-relaxed">
-                Click any node to inspect it. Paper nodes open directly in the PDF viewer; metadata nodes reveal the papers around them.
+                Click any node to inspect it. Paper nodes open the document, and metadata nodes reveal the papers around them.
               </p>
             )}
           </div>
@@ -616,6 +1061,22 @@ export default function GraphView({
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mb-2">Timeline</p>
+              <div className="space-y-1.5 text-xs text-slate-300 mb-3">
+                <div className="flex items-center justify-between">
+                  <span>From</span>
+                  <span className="font-black text-white">{graph?.time.from || 'N/A'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>To</span>
+                  <span className="font-black text-white">{graph?.time.to || 'N/A'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>As Of</span>
+                  <span className="font-black text-white">{graph?.time.asOf || 'N/A'}</span>
+                </div>
+              </div>
+
               <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-black mb-2">Relation Types</p>
               <div className="space-y-1.5 text-xs text-slate-300">
                 <div className="flex items-center justify-between">

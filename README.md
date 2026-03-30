@@ -1,6 +1,6 @@
-# 🎓 KKP Scholar: AI Research Co-Pilot
+# 🎓 Scholar.AI
 
-**KKP Scholar** is a premium, local-first research management platform that uses AI to automate the tedious parts of handling institutional research papers. 
+**Scholar.AI** is a premium, local-first research management platform that uses AI to automate the tedious parts of handling institutional research papers. 
 
 It provides a seamless workflow from raw PDF ingestion to deep AI-driven insights.
 

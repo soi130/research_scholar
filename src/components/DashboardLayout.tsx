@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { LayoutDashboard, Library, MessageSquareShare, Settings, Search, RefreshCw, Loader2, X, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { LayoutDashboard, Library, MessageSquareShare, Settings, Search, RefreshCw, Loader2, ChevronLeft, ChevronRight, Share2, Moon, SunMedium } from 'lucide-react';
 import ReviewGrid from './ReviewGrid';
 import LibraryView from './LibraryView';
 import ChatPanel from './ChatPanel';
@@ -15,12 +15,29 @@ function cn(...inputs: ClassValue[]) {
 
 export default function DashboardLayout() {
   type View = 'library' | 'review' | 'chat' | 'search' | 'graph';
+  type Theme = 'light' | 'dark';
   const [view, setView] = useState<View>('library');
   const [isScanning, setIsScanning] = useState(false);
   const [selectedPaperIds, setSelectedPaperIds] = useState<number[]>([]);
-  const [activeViewerId, setActiveViewerId] = useState<number | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === 'undefined') return 'light';
+    const storedTheme = window.localStorage.getItem('scholar-theme');
+    const systemPrefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    return storedTheme === 'dark' || storedTheme === 'light'
+      ? storedTheme
+      : systemPrefersDark
+        ? 'dark'
+        : 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem('scholar-theme', theme);
+  }, [theme]);
 
   const handleScan = async () => {
     setIsScanning(true);
@@ -28,7 +45,38 @@ export default function DashboardLayout() {
     setIsScanning(false);
   };
 
-  const closeViewer = () => setActiveViewerId(null);
+  const applyTheme = (nextTheme: Theme) => {
+    setTheme(nextTheme);
+    document.documentElement.dataset.theme = nextTheme;
+    document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+    document.documentElement.style.colorScheme = nextTheme;
+    window.localStorage.setItem('scholar-theme', nextTheme);
+  };
+
+  const toggleTheme = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
+  const openPdfInNewWindow = (id: number) => {
+    const pdfUrl = `/api/papers/${id}/serve`;
+    const width = Math.max(960, Math.min(window.screen.availWidth - 80, 1320));
+    const height = Math.max(700, Math.min(window.screen.availHeight - 80, 980));
+    const left = Math.max(20, Math.round((window.screen.availWidth - width) / 2));
+    const top = Math.max(20, Math.round((window.screen.availHeight - height) / 2));
+    const features = [
+      `width=${width}`,
+      `height=${height}`,
+      `left=${left}`,
+      `top=${top}`,
+      'resizable=yes',
+      'scrollbars=yes',
+      'toolbar=no',
+      'menubar=no',
+      'status=no',
+      'location=yes',
+    ].join(',');
+    const popup = window.open(pdfUrl, `scholar-pdf-${id}`, features);
+    if (!popup) {
+      console.warn('Popup blocked by browser. Please allow popups for this site.');
+    }
+  };
 
   const navItems = [
     { id: 'library', label: 'Dashboard', icon: LayoutDashboard },
@@ -39,16 +87,16 @@ export default function DashboardLayout() {
   ] as const satisfies ReadonlyArray<{ id: View; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }>;
 
   return (
-    <div className="h-screen bg-[#fdfcff] text-slate-900 font-sans selection:bg-violet-500/20 flex overflow-hidden">
+    <div className="h-screen bg-[var(--background)] text-[var(--foreground)] font-sans selection:bg-violet-500/20 flex overflow-hidden">
       {/* 1. Collapsible Sidebar */}
       <aside className={cn(
-        "glass border-r border-slate-200/50 flex flex-col transition-all duration-300 z-50 flex-shrink-0 relative shadow-sm",
+        "glass border-r border-[color:var(--border)] flex flex-col transition-all duration-300 z-50 flex-shrink-0 relative shadow-sm",
         isCollapsed ? "w-20" : "w-64"
       )}>
         {/* Toggle Button */}
         <button 
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="absolute -right-3 top-24 w-6 h-6 bg-white border border-slate-200 rounded-full flex items-center justify-center shadow-lg hover:text-violet-600 transition-colors z-50 text-slate-400"
+          className="absolute -right-3 top-24 w-6 h-6 bg-[var(--surface-strong)] border border-[color:var(--border)] rounded-full flex items-center justify-center shadow-lg hover:text-violet-600 transition-colors z-50 text-slate-400"
         >
           {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
@@ -59,7 +107,7 @@ export default function DashboardLayout() {
           </div>
           {!isCollapsed && (
             <span className="text-xl font-black tracking-tight text-slate-900 whitespace-nowrap animate-in fade-in duration-500">
-              KKP <span className="text-violet-600">Scholar</span>
+              <span>Scholar.</span><span className="text-violet-600">AI</span>
             </span>
           )}
         </div>
@@ -73,7 +121,7 @@ export default function DashboardLayout() {
                 "flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
                 view === item.id 
                   ? 'bg-violet-600/10 text-violet-600 font-bold shadow-sm' 
-                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100/80'
+                  : 'text-slate-500 hover:text-slate-900 hover:bg-[var(--surface-muted)]'
               )}
               title={isCollapsed ? item.label : ''}
             >
@@ -89,18 +137,30 @@ export default function DashboardLayout() {
               )}
             </button>
           ))}
-        </nav>
+          </nav>
 
-        <div className="p-3 border-t border-slate-200/50 mt-auto flex justify-center">
-          <button className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-slate-100">
+        <div className="p-3 border-t border-[color:var(--border)] mt-auto flex items-center justify-center gap-2">
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-2 px-3 py-3 text-slate-400 hover:text-violet-600 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? <SunMedium size={20} /> : <Moon size={20} />}
+            {!isCollapsed && (
+              <span className="text-[10px] font-black uppercase tracking-[0.2em]">
+                {theme === 'dark' ? 'Light' : 'Dark'}
+              </span>
+            )}
+          </button>
+          <button className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-[var(--surface-muted)]">
             <Settings size={20} />
           </button>
         </div>
       </aside>
 
       {/* 2. Main Scrollable Area */}
-      <div className={cn("flex-1 flex flex-col min-w-0 transition-all duration-300 relative bg-[#fdfcff]", activeViewerId ? "max-w-[40%]" : "max-w-full")}>
-        <header className="h-20 flex items-center justify-between px-10 glass border-b border-slate-200/50 flex-shrink-0 sticky top-0 z-40">
+      <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 relative bg-[var(--background)]">
+        <header className="h-20 flex items-center justify-between px-10 glass border-b border-[color:var(--border)] flex-shrink-0 sticky top-0 z-40">
           <div className="relative group w-full max-w-md">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-violet-600 transition-colors" size={18} />
             <input 
@@ -108,7 +168,7 @@ export default function DashboardLayout() {
               placeholder="Search papers, authors, tags, or topics..." 
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-100/50 border border-slate-200/50 rounded-2xl py-2.5 pl-12 pr-4 outline-none focus:border-violet-500/30 focus:bg-white transition-all placeholder:text-slate-400 text-sm shadow-inner"
+              className="w-full bg-[var(--surface-muted)] border border-[color:var(--border)] rounded-2xl py-2.5 pl-12 pr-4 outline-none focus:border-violet-500/30 focus:bg-[var(--surface-strong)] transition-all placeholder:text-slate-400 text-sm shadow-inner"
             />
           </div>
 
@@ -126,7 +186,7 @@ export default function DashboardLayout() {
 
         <div className="flex-1 overflow-y-auto p-10 custom-scrollbar scroll-smooth">
           <div className="mb-12">
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-4">
+            <h1 className="text-4xl font-black text-[var(--foreground)] tracking-tight leading-none mb-4">
               {view === 'review'
                 ? 'Awaiting Human Review'
                 : view === 'library'
@@ -138,7 +198,7 @@ export default function DashboardLayout() {
                       : 'Financial Insights Multi-Chat'}
             </h1>
             <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-              <span className="w-8 h-px bg-slate-200"></span>
+              <span className="w-8 h-px bg-[color:var(--border)]"></span>
               {view === 'review'
                 ? 'Verify and approve AI-generated research metadata.'
                 : view === 'library'
@@ -155,11 +215,11 @@ export default function DashboardLayout() {
             {(view === 'library' || view === 'review') && (
               <div className="flex flex-col gap-8">
                 {view === 'review' ? (
-                  <ReviewGrid onOpenViewer={(id) => setActiveViewerId(id)} searchQuery={searchQuery} />
+                  <ReviewGrid onOpenViewer={openPdfInNewWindow} searchQuery={searchQuery} />
                 ) : (
                   <LibraryView 
                     onSelectForChat={(ids) => { setSelectedPaperIds(ids); if(ids.length > 0) setView('chat'); }} 
-                    onOpenViewer={(id) => setActiveViewerId(id)}
+                    onOpenViewer={openPdfInNewWindow}
                     searchQuery={searchQuery}
                   />
                 )}
@@ -167,14 +227,14 @@ export default function DashboardLayout() {
             )}
             {view === 'graph' && (
               <GraphView
-                onOpenViewer={(id) => setActiveViewerId(id)}
+                onOpenViewer={openPdfInNewWindow}
                 searchQuery={searchQuery}
               />
             )}
             {view === 'chat' && (
               <ChatPanel 
                 selectedPaperIds={selectedPaperIds} 
-                onOpenViewer={(id) => setActiveViewerId(id)} 
+                onOpenViewer={openPdfInNewWindow} 
                 onClearSelection={() => setSelectedPaperIds([])}
                 onOpenLibrary={() => setView('library')}
               />
@@ -182,7 +242,7 @@ export default function DashboardLayout() {
             {view === 'search' && (
               <div className="space-y-8 h-full">
                 {searchQuery.trim() ? (
-                  <LibraryView onSelectForChat={setSelectedPaperIds} onOpenViewer={setActiveViewerId} searchQuery={searchQuery} />
+                  <LibraryView onSelectForChat={setSelectedPaperIds} onOpenViewer={openPdfInNewWindow} searchQuery={searchQuery} />
                 ) : (
                   <div className="glass p-20 rounded-3xl text-center border-dashed border-2 border-slate-200 text-slate-400">
                     <Search size={48} className="mx-auto text-slate-200 mb-6" />
@@ -195,29 +255,6 @@ export default function DashboardLayout() {
           </div>
         </div>
       </div>
-
-      {/* 3. Split-Pane PDF Viewer */}
-      {activeViewerId && (
-        <div className="w-[60%] border-l border-slate-200/50 flex flex-col bg-slate-50 relative animate-in slide-in-from-right duration-500 shadow-[-20px_0_50px_rgba(0,0,0,0.05)] z-50">
-           <div className="h-20 flex items-center justify-between px-6 bg-white border-b border-slate-200/50 flex-shrink-0">
-             <div className="flex items-center gap-2">
-               <div className="p-2 bg-violet-100 text-violet-600 rounded-lg"><Library size={16} /></div>
-               <span className="text-sm font-bold text-slate-900">Document Reader</span>
-             </div>
-             <button 
-              onClick={closeViewer}
-              className="p-2.5 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl transition-all border border-slate-200/50"
-             >
-               <X size={20} />
-             </button>
-           </div>
-          <iframe
-            src={`/api/papers/${activeViewerId}/serve`}
-            className="w-full h-full border-0"
-            title="PDF Viewer"
-          />
-        </div>
-      )}
 
       <style jsx global>{`
         .glass {

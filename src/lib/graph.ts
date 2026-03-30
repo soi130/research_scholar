@@ -7,6 +7,8 @@ export type GraphEdgeType =
   | 'series_of'
   | 'related_to';
 
+export type GraphEdgeChangeType = 'new' | 'revision' | 'invalidated';
+
 export interface PaperGraphSource {
   id: number;
   title: string | null;
@@ -14,6 +16,7 @@ export interface PaperGraphSource {
   publisher: string | null;
   series_name: string | null;
   published_date: string | null;
+  created_at?: string | null;
   abstract: string | null;
   tags: string | string[] | null;
   status?: string | null;
@@ -28,6 +31,7 @@ export interface GraphNode {
   metadata: {
     title?: string;
     publishedDate?: string | null;
+    ingestedAt?: string | null;
     abstract?: string | null;
     status?: string | null;
   };
@@ -41,6 +45,11 @@ export interface GraphEdge {
   weight: number;
   metadata: {
     reasons?: string[];
+    valid_from?: string | null;
+    valid_to?: string | null;
+    as_of_date?: string | null;
+    confidence?: number;
+    change_type?: GraphEdgeChangeType;
   };
 }
 
@@ -52,6 +61,11 @@ export interface KnowledgeGraph {
     nodes: number;
     edges: number;
     relations: Record<string, number>;
+  };
+  time: {
+    from: string | null;
+    to: string | null;
+    asOf: string | null;
   };
 }
 
@@ -121,6 +135,31 @@ function addBucket(bucket: RelationBucket, key: string, paperId: number) {
   bucket.set(key, new Set([paperId]));
 }
 
+function toIsoDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoPrefix) return isoPrefix[1];
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function dateMax(values: Array<string | null | undefined>): string | null {
+  const filtered = values.filter((value): value is string => Boolean(value));
+  if (filtered.length === 0) return null;
+  return filtered.reduce((latest, current) => (current > latest ? current : latest));
+}
+
+function dateMin(values: Array<string | null | undefined>): string | null {
+  const filtered = values.filter((value): value is string => Boolean(value));
+  if (filtered.length === 0) return null;
+  return filtered.reduce((earliest, current) => (current < earliest ? current : earliest));
+}
+
 export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph {
   const nodeMap = new Map<string, GraphNode>();
   const edgeMap = new Map<string, GraphEdge>();
@@ -138,10 +177,17 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
   const seriesBuckets: RelationBucket = new Map();
 
   const paperLabels = new Map<number, string>();
+  const paperDates = new Map<number, string | null>();
+  const timelineDates: string[] = [];
 
   for (const paper of papers) {
     const paperLabel = normalizeLabel(paper.title || `Paper ${paper.id}`);
     paperLabels.set(paper.id, paperLabel);
+    const paperPublishedDate = toIsoDate(paper.published_date);
+    const paperIngestedAt = toIsoDate(paper.created_at || null);
+    const paperAsOf = paperPublishedDate || paperIngestedAt;
+    paperDates.set(paper.id, paperAsOf);
+    if (paperAsOf) timelineDates.push(paperAsOf);
     const paperNodeId = `paper:${paper.id}`;
 
     nodeMap.set(paperNodeId, {
@@ -152,7 +198,8 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
       count: 1,
       metadata: {
         title: paperLabel,
-        publishedDate: paper.published_date,
+        publishedDate: paperPublishedDate,
+        ingestedAt: paperIngestedAt,
         abstract: paper.abstract,
         status: paper.status || null,
       },
@@ -183,7 +230,13 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
           target: authorNodeId,
           type: 'authored_by',
           weight: 1,
-          metadata: {},
+          metadata: {
+            valid_from: paperAsOf,
+            valid_to: null,
+            as_of_date: paperAsOf,
+            confidence: 1,
+            change_type: 'new',
+          },
         });
       }
       relationCounts.authored_by += 1;
@@ -210,7 +263,13 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
           target: tagNodeId,
           type: 'tagged_with',
           weight: 1,
-          metadata: {},
+          metadata: {
+            valid_from: paperAsOf,
+            valid_to: null,
+            as_of_date: paperAsOf,
+            confidence: 1,
+            change_type: 'new',
+          },
         });
       }
       relationCounts.tagged_with += 1;
@@ -236,7 +295,13 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
           target: publisherNodeId,
           type: 'published_by',
           weight: 1,
-          metadata: {},
+          metadata: {
+            valid_from: paperAsOf,
+            valid_to: null,
+            as_of_date: paperAsOf,
+            confidence: 1,
+            change_type: 'new',
+          },
         });
       }
       relationCounts.published_by += 1;
@@ -262,7 +327,13 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
           target: seriesNodeId,
           type: 'series_of',
           weight: 1,
-          metadata: {},
+          metadata: {
+            valid_from: paperAsOf,
+            valid_to: null,
+            as_of_date: paperAsOf,
+            confidence: 1,
+            change_type: 'new',
+          },
         });
       }
       relationCounts.series_of += 1;
@@ -295,7 +366,15 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
             const reasons = new Set(existing.metadata.reasons || []);
             reasons.add(reason);
             existing.metadata.reasons = Array.from(reasons);
+            const sourceDate = paperDates.get(ids[i]) || null;
+            const targetDate = paperDates.get(ids[j]) || null;
+            existing.metadata.as_of_date = dateMax([existing.metadata.as_of_date || null, sourceDate, targetDate]);
+            existing.metadata.valid_from = dateMin([existing.metadata.valid_from || null, sourceDate, targetDate]);
           } else {
+            const sourceDate = paperDates.get(ids[i]) || null;
+            const targetDate = paperDates.get(ids[j]) || null;
+            const edgeAsOf = dateMax([sourceDate, targetDate]);
+            const edgeFrom = dateMin([sourceDate, targetDate]);
             edgeMap.set(edgeId, {
               id: edgeId,
               source: sourceId,
@@ -304,6 +383,11 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
               weight: 1,
               metadata: {
                 reasons: [reason],
+                valid_from: edgeFrom,
+                valid_to: null,
+                as_of_date: edgeAsOf,
+                confidence: 0.75,
+                change_type: 'new',
               },
             });
           }
@@ -329,6 +413,8 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
   });
 
   const edges = Array.from(edgeMap.values()).sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id));
+  const fromDate = timelineDates.length > 0 ? timelineDates.reduce((a, b) => (a < b ? a : b)) : null;
+  const toDate = timelineDates.length > 0 ? timelineDates.reduce((a, b) => (a > b ? a : b)) : null;
 
   return {
     nodes,
@@ -338,6 +424,11 @@ export function buildKnowledgeGraph(papers: PaperGraphSource[]): KnowledgeGraph 
       nodes: nodes.length,
       edges: edges.length,
       relations: relationCounts,
+    },
+    time: {
+      from: fromDate,
+      to: toDate,
+      asOf: toDate,
     },
   };
 }

@@ -143,13 +143,13 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
              <input 
               type="text" 
               placeholder="Create new institutional tag..." 
-              className="flex-1 bg-slate-100/50 border border-slate-200/50 rounded-xl px-4 py-2 text-sm text-slate-900 focus:outline-none focus:border-violet-500 focus:bg-white transition-all shadow-inner"
+              className="flex-1 bg-[var(--surface-muted)] border border-slate-200/50 rounded-xl px-4 py-2 text-sm text-slate-900 focus:outline-none focus:border-violet-500 focus:bg-[var(--surface-strong)] transition-all shadow-inner"
               value={newTag}
               onChange={e => setNewTag(e.target.value)}
               onKeyDown={e => { if(e.key === 'Enter') handleAddMasterTag(); }}
             />
             {newTag.trim() && masterTags.some(t => t.toLowerCase().includes(newTag.toLowerCase()) && t.toLowerCase() !== newTag.toLowerCase()) && (
-              <div className="absolute top-[120%] left-0 w-[calc(100%-8rem)] bg-white border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto overflow-hidden">
+              <div className="absolute top-[120%] left-0 w-[calc(100%-8rem)] bg-[var(--surface-strong)] border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto overflow-hidden">
                 {masterTags.filter(t => t.toLowerCase().includes(newTag.toLowerCase()) && t.toLowerCase() !== newTag.toLowerCase()).map(tag => (
                   <button
                     key={tag}
@@ -172,7 +172,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
 
         {/* Bulk Actions */}
         {papers.length > 0 && (
-          <div className="glass p-6 rounded-3xl border border-slate-200/50 flex items-center shadow-lg shadow-slate-200/20 flex-shrink-0">
+        <div className="glass p-6 rounded-3xl border border-slate-200/50 flex items-center shadow-lg shadow-slate-200/20 flex-shrink-0">
             <button 
               onClick={handleApproveAll}
               className="px-8 py-2.5 bg-red-500 hover:bg-red-600 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-red-500/20 flex items-center gap-2 text-sm font-black tracking-widest uppercase"
@@ -185,10 +185,10 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
 
       <div className="flex flex-col gap-8">
         {papers.map((paper) => (
-          <div key={paper.id} className="glass group relative p-6 rounded-[2.5rem] border border-slate-200/50 hover:border-violet-500/30 hover:bg-white transition-all duration-500 shadow-sm hover:shadow-2xl hover:shadow-violet-500/5 flex gap-8 items-center overflow-hidden">
+          <div key={paper.id} className="glass group relative p-6 rounded-[2.5rem] border border-slate-200/50 hover:border-violet-500/30 hover:bg-[var(--surface-strong)] transition-all duration-500 shadow-sm hover:shadow-2xl hover:shadow-violet-500/5 flex gap-8 items-center overflow-hidden">
             
             {/* 1st Page Preview (List Mode) */}
-            <div className="relative w-48 aspect-[3/4] bg-slate-50 rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all cursor-pointer shadow-inner flex-shrink-0" onClick={() => onOpenViewer?.(paper.id)}>
+            <div className="relative w-48 aspect-[3/4] bg-[var(--surface-soft)] rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all cursor-pointer shadow-inner flex-shrink-0" onClick={() => onOpenViewer?.(paper.id)}>
                <PdfThumbnail paperId={paper.id} className="w-full h-full" />
                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-4">
                   <div className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-lg text-slate-900 text-[10px] font-black shadow-xl">
@@ -202,7 +202,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                   <div className="flex-1">
                     {editingId === paper.id ? (
                       <textarea 
-                        className="bg-slate-50 border border-violet-500/30 rounded-xl p-3 w-full h-24 text-slate-900 text-lg font-black focus:bg-white outline-none transition-all"
+                        className="bg-[var(--surface-soft)] border border-violet-500/30 rounded-xl p-3 w-full h-24 text-slate-900 text-lg font-black focus:bg-[var(--surface-strong)] outline-none transition-all"
                         value={editValues.title || paper.title} 
                         onChange={e => setEditValues({...editValues, title: e.target.value})}
                       />
@@ -225,11 +225,11 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                </div>
 
                <div className="flex flex-wrap gap-4 text-[10px] items-center">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 rounded-xl border border-slate-200/30">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-slate-200/30">
                     <span className="text-slate-400 font-black uppercase tracking-widest"><Building2 size={10} className="inline mr-1" /> HOUSE:</span>
                     {editingId === paper.id ? (
                       <input 
-                        className="bg-white border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none"
+                        className="bg-[var(--surface-strong)] border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none"
                         value={editValues.publisher || ''}
                         onChange={e => setEditValues({...editValues, publisher: e.target.value})}
                       />
@@ -237,11 +237,11 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                       <span className="font-bold text-slate-900">{paper.publisher || 'N/A'}</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 rounded-xl border border-slate-200/30">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-slate-200/30">
                     <span className="text-slate-400 font-black uppercase tracking-widest"><Calendar size={10} className="inline mr-1" /> DATE:</span>
                     {editingId === paper.id ? (
                       <input 
-                        className="bg-white border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none w-24"
+                        className="bg-[var(--surface-strong)] border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none w-24"
                         value={editValues.published_date || ''}
                         onChange={e => setEditValues({...editValues, published_date: e.target.value})}
                       />
@@ -259,7 +259,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                            className={`px-2 py-1 rounded-lg font-black tracking-wide border transition-colors ${
                              (editValues.tags || []).includes(tag)
                                ? 'bg-violet-600 text-white border-violet-600'
-                               : 'bg-white text-slate-400 border-slate-200 hover:border-violet-300'
+                               : 'bg-[var(--surface-muted)] text-[var(--foreground)] border-[color:var(--border)] hover:border-violet-300'
                            }`}
                          >
                            {tag.toUpperCase()}
@@ -269,7 +269,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                           <input
                             type="text"
                             placeholder="+ New Tag"
-                            className="bg-white border border-dashed border-violet-300 rounded-lg px-2 py-1 text-[10px] font-black tracking-wide text-violet-600 outline-none w-32 placeholder:text-violet-300 focus:border-violet-500 focus:bg-violet-50"
+                            className="bg-[var(--surface-strong)] border border-dashed border-violet-300 rounded-lg px-2 py-1 text-[10px] font-black tracking-wide text-violet-600 outline-none w-32 placeholder:text-violet-300 focus:border-violet-500 focus:bg-[var(--surface-soft)]"
                             value={tagInputValue}
                             onChange={(e) => setTagInputValue(e.target.value)}
                             onKeyDown={(e) => {
@@ -284,7 +284,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                             }}
                           />
                           {tagInputValue.trim() && masterTags.some(t => t.toLowerCase().includes(tagInputValue.toLowerCase()) && !(editValues.tags || []).includes(t.toLowerCase())) && (
-                            <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                            <div className="absolute top-full left-0 mt-1 w-48 bg-[var(--surface-strong)] border border-[color:var(--border)] rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                               {masterTags
                                 .filter(t => t.toLowerCase().includes(tagInputValue.toLowerCase()) && !(editValues.tags || []).includes(t.toLowerCase()))
                                 .map(tag => (
@@ -296,7 +296,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                                     setEditValues(prev => ({...prev, tags: [...(prev.tags || []), tag]}));
                                     setTagInputValue('');
                                   }}
-                                  className="w-full text-left px-3 py-2 text-[10px] text-slate-700 hover:bg-violet-50 hover:text-violet-700 font-black tracking-wide border-b border-slate-100 last:border-0 uppercase"
+                                  className="w-full text-left px-3 py-2 text-[10px] text-[var(--foreground)] hover:bg-[var(--surface-muted)] hover:text-violet-700 font-black tracking-wide border-b border-[color:var(--border)] last:border-0 uppercase"
                                 >
                                   {tag}
                                 </button>
@@ -308,7 +308,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                     ) : (
                       <div className="flex-1 overflow-x-auto no-scrollbar flex gap-2">
                         {(paper.tags || []).map(tag => (
-                          <span key={tag} className="px-2 py-1 bg-violet-50 text-violet-600 rounded-lg font-black tracking-wide border border-violet-100">
+                          <span key={tag} className="px-2 py-1 bg-[var(--surface-muted)] text-[var(--foreground)] rounded-lg font-black tracking-wide border border-[color:var(--border)]">
                             {tag.toUpperCase()}
                           </span>
                         ))}
@@ -317,7 +317,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                   </div>
                </div>
 
-               <div className="grid grid-cols-4 gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-200/30">
+               <div className="grid grid-cols-4 gap-4 p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)]">
                   {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
                     <div key={k} className="space-y-0.5 min-w-0">
                       <span className="text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate block">{k}</span>
@@ -328,7 +328,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                </div>
             </div>
 
-            <div className="flex flex-col gap-2 w-48 pl-8 border-l border-slate-100">
+            <div className="flex flex-col gap-2 w-48 pl-8 border-l border-[color:var(--border)]">
                {editingId !== paper.id && (
                   <>
                     <button 
@@ -339,7 +339,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
                     </button>
                     <button 
                       onClick={() => onOpenViewer?.(paper.id)}
-                      className="w-full py-3 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] hover:bg-slate-200 hover:text-slate-900 transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
+                      className="w-full py-3 bg-[var(--surface-muted)] text-[var(--foreground)] rounded-2xl font-black text-[10px] hover:bg-[var(--surface-soft)] hover:text-violet-700 transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
                     >
                       <Eye size={14} /> VIEW PDF
                     </button>
@@ -357,7 +357,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
           <button
             onClick={() => void fetchPending({ nextOffset: offset + PAGE_SIZE, append: true, query: searchQuery })}
             disabled={loadingMore}
-            className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-violet-600 hover:border-violet-300 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 rounded-xl border border-[color:var(--border)] bg-[var(--surface-strong)] text-[var(--foreground)] hover:text-violet-600 hover:border-violet-300 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
           >
             {loadingMore ? <Loader2 size={14} className="animate-spin" /> : null}
             Load More

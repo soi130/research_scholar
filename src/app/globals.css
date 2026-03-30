@@ -1,16 +1,42 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   --background: #fdfcff;
-  --foreground: #1e1b4b;
+  --foreground: #1f173d;
+  --surface: rgba(255, 255, 255, 0.82);
+  --surface-strong: #ffffff;
+  --surface-soft: #f8f7ff;
+  --surface-muted: #eef0f7;
+  --border: rgba(99, 102, 241, 0.12);
+  --border-strong: rgba(99, 102, 241, 0.22);
   --accent: #7c3aed;
+  --accent-soft: rgba(124, 58, 237, 0.12);
   --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(99, 102, 241, 0.05);
+  --glass-border: rgba(99, 102, 241, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0f1016;
+  --foreground: #f4efff;
+  --surface: rgba(22, 23, 32, 0.92);
+  --surface-strong: #171822;
+  --surface-soft: #1d1f2a;
+  --surface-muted: #252735;
+  --border: rgba(171, 141, 255, 0.16);
+  --border-strong: rgba(171, 141, 255, 0.3);
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.15);
+  --glass-bg: rgba(22, 23, 32, 0.72);
+  --glass-border: rgba(167, 139, 250, 0.14);
 }
 
 body {
   color: var(--foreground);
-  background: var(--background);
+  background:
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.08), transparent 32%),
+    var(--background);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -23,6 +49,78 @@ body {
   border: 1px solid var(--glass-border);
 }
 
+html[data-theme="dark"] .glass,
+html.dark .glass {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] body,
+html.dark body {
+  background:
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.15), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.06), transparent 22%),
+    linear-gradient(180deg, #13141b 0%, #0b0c12 100%);
+}
+
+html[data-theme="dark"] .bg-white,
+html.dark .bg-white,
+html[data-theme="dark"] .bg-slate-50,
+html.dark .bg-slate-50,
+html[data-theme="dark"] .bg-slate-100,
+html.dark .bg-slate-100 {
+  background-color: var(--surface) !important;
+}
+
+html[data-theme="dark"] .bg-slate-200,
+html.dark .bg-slate-200 {
+  background-color: var(--surface-muted) !important;
+}
+
+html[data-theme="dark"] .border-slate-100,
+html.dark .border-slate-100,
+html[data-theme="dark"] .border-slate-200,
+html.dark .border-slate-200 {
+  border-color: var(--border) !important;
+}
+
+html[data-theme="dark"] .text-slate-900,
+html.dark .text-slate-900,
+html[data-theme="dark"] .text-slate-800,
+html.dark .text-slate-800 {
+  color: var(--foreground) !important;
+}
+
+html[data-theme="dark"] .text-slate-700,
+html.dark .text-slate-700 {
+  color: rgba(244, 239, 255, 0.9) !important;
+}
+
+html[data-theme="dark"] .text-slate-600,
+html.dark .text-slate-600,
+html[data-theme="dark"] .text-slate-500,
+html.dark .text-slate-500,
+html[data-theme="dark"] .text-slate-400,
+html.dark .text-slate-400 {
+  color: rgba(226, 219, 246, 0.72) !important;
+}
+
+html[data-theme="dark"] .shadow-slate-200\/20,
+html.dark .shadow-slate-200\/20,
+html[data-theme="dark"] .shadow-slate-200\/50,
+html.dark .shadow-slate-200\/50,
+html[data-theme="dark"] .shadow-slate-200\/80,
+html.dark .shadow-slate-200\/80,
+html[data-theme="dark"] .shadow-slate-200,
+html.dark .shadow-slate-200 {
+  --tw-shadow-color: rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-theme="dark"] ::selection,
+html.dark ::selection {
+  background: rgba(167, 139, 250, 0.28);
+  color: var(--foreground);
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -31,9 +129,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(124, 58, 237, 0.22);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(124, 58, 237, 0.38);
 }

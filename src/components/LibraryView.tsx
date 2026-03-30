@@ -113,7 +113,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
             className={`glass group relative p-5 rounded-3xl border transition-all cursor-pointer flex gap-6 items-center overflow-hidden ${
               selected.includes(paper.id) 
                 ? 'border-violet-500/30 bg-violet-500/5 ring-1 ring-violet-500/10' 
-                : 'border-slate-200/50 hover:border-violet-500/20 hover:bg-white active:scale-[0.99]'
+                : 'border-slate-200/50 hover:border-violet-500/20 hover:bg-[var(--surface-strong)] active:scale-[0.99]'
             }`}
           >
             {/* 1st Page Preview (List Mode) */}
@@ -149,9 +149,9 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
               {paper.forecasts && Object.keys(paper.forecasts).length > 0 && (
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                   {Object.entries(paper.forecasts).slice(0, 5).map(([k, v]) => (
-                    <div key={k} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-violet-50/50 rounded-xl border border-violet-100/50">
-                      <span className="text-[8px] text-violet-400 uppercase font-black tracking-tight">{k}</span>
-                      <span className="text-[10px] text-violet-900 font-bold">{renderValue(v)}</span>
+                    <div key={k} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-[color:var(--border)]">
+                      <span className="text-[8px] text-[var(--foreground)] uppercase font-black tracking-tight">{k}</span>
+                      <span className="text-[10px] text-[color:var(--accent)] font-bold">{renderValue(v)}</span>
                     </div>
                   ))}
                 </div>
@@ -160,7 +160,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
               {paper.tags && paper.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {paper.tags.map((tag) => (
-                    <span key={tag} className="text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200/50">
+                    <span key={tag} className="text-[9px] font-bold text-[var(--foreground)] bg-[var(--surface-muted)] px-2 py-0.5 rounded-full border border-[color:var(--border)]">
                       #{tag}
                     </span>
                   ))}
@@ -175,7 +175,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
                "absolute top-4 right-4 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all hover:scale-125 z-10",
                selected.includes(paper.id) 
                 ? "bg-violet-600 border-violet-500 text-white shadow-lg shadow-violet-500/30" 
-                : "bg-white/50 border-white/80 text-transparent border-slate-200"
+               : "bg-[var(--surface-muted)]/80 border-[color:var(--border)] text-transparent"
             )}>
                <Check size={12} strokeWidth={4} />
             </div>
@@ -190,7 +190,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
           <button
             onClick={() => void fetchPapers({ nextOffset: offset + PAGE_SIZE, append: true, query: searchQuery })}
             disabled={loadingMore}
-            className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-violet-600 hover:border-violet-300 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 rounded-xl border border-[color:var(--border)] bg-[var(--surface-strong)] text-slate-600 hover:text-violet-600 hover:border-violet-300 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
           >
             {loadingMore ? <Loader2 size={14} className="animate-spin" /> : null}
             Load More
