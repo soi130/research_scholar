@@ -49,7 +49,11 @@ export async function getDb(): Promise<Database> {
       series_name TEXT,
       abstract TEXT,
       key_findings TEXT,
+      forecasts TEXT,
+      topic_labels TEXT,
+      topic_summary TEXT,
       tags TEXT,
+      latest_extraction_id INTEGER,
       status TEXT DEFAULT 'pending',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -62,10 +66,60 @@ export async function getDb(): Promise<Database> {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS paper_key_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      paper_id INTEGER NOT NULL,
+      paper_name TEXT,
+      filepath TEXT,
+      publish_date TEXT,
+      indicator TEXT,
+      house TEXT,
+      value TEXT,
+      unit TEXT,
+      forecast_period TEXT,
+      source_text TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS paper_extractions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      paper_id INTEGER NOT NULL,
+      file_hash TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      prompt_version TEXT,
+      extraction_payload TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS paper_topic_labels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      paper_id INTEGER NOT NULL,
+      topic_code TEXT NOT NULL,
+      relevance INTEGER NOT NULL DEFAULT 0,
+      direction INTEGER NOT NULL DEFAULT 0,
+      confidence INTEGER NOT NULL DEFAULT 0,
+      evidence TEXT NOT NULL DEFAULT '',
+      regime TEXT,
+      drivers TEXT,
+      display_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
     CREATE INDEX IF NOT EXISTS idx_papers_status_created_at ON papers(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_papers_hash ON papers(hash);
     CREATE INDEX IF NOT EXISTS idx_papers_published_date ON papers(published_date);
     CREATE INDEX IF NOT EXISTS idx_papers_publisher ON papers(publisher);
+    CREATE INDEX IF NOT EXISTS idx_papers_latest_extraction_id ON papers(latest_extraction_id);
+    CREATE INDEX IF NOT EXISTS idx_papers_topic_summary ON papers(status, published_date);
+    CREATE INDEX IF NOT EXISTS idx_paper_key_calls_paper_id ON paper_key_calls(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_paper_key_calls_publish_date ON paper_key_calls(publish_date);
+    CREATE INDEX IF NOT EXISTS idx_paper_key_calls_indicator ON paper_key_calls(indicator);
+    CREATE INDEX IF NOT EXISTS idx_paper_key_calls_house ON paper_key_calls(house);
+    CREATE INDEX IF NOT EXISTS idx_paper_extractions_paper_id_created_at ON paper_extractions(paper_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_paper_extractions_file_hash ON paper_extractions(file_hash);
+    CREATE INDEX IF NOT EXISTS idx_paper_topic_labels_paper_id ON paper_topic_labels(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_paper_topic_labels_topic_code ON paper_topic_labels(topic_code);
   `);
 
   try {
@@ -76,6 +130,15 @@ export async function getDb(): Promise<Database> {
   } catch {}
   try {
     await db.exec(`ALTER TABLE papers ADD COLUMN forecasts TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE papers ADD COLUMN latest_extraction_id INTEGER`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE papers ADD COLUMN topic_labels TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE papers ADD COLUMN topic_summary TEXT`);
   } catch {}
 
   // Full-text search index for scalable paper search and retrieval.

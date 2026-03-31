@@ -102,6 +102,12 @@ function parsePaperRow(row: PaperRow) {
     key_findings: row.key_findings ? JSON.parse(String(row.key_findings)) : [],
     tags: row.tags ? JSON.parse(String(row.tags)) : [],
     forecasts: row.forecasts ? JSON.parse(String(row.forecasts)) : {},
+    topic_labels: row.topic_labels ? JSON.parse(String(row.topic_labels)) : [],
+    topic_summary: row.topic_summary ? JSON.parse(String(row.topic_summary)) : {
+      core_topics: [],
+      top_positive_topics: [],
+      top_negative_topics: [],
+    },
   };
 }
 

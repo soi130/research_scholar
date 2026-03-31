@@ -82,3 +82,12 @@ To protect copyrighted material and local state, this project includes a robust 
 
 ## 📜 License
 This project is for private research use. Please ensure you have the rights to use the PDF documents you ingest.
+
+---
+
+## Checkpoint Notes
+
+- The review/dashboard pipeline now includes richer extraction for summary, 3 KTAs, key-call rows, and structured topic sentiment.
+- A known open issue remains in numeric extraction: the model can still confuse `forecast` numbers with `outturn` or realized/review numbers.
+- Next follow-up:
+  tighten the extraction prompt and post-processing so papers reviewing released CPI, exports, GDP, etc. do not get mislabeled as forward forecasts unless the paper explicitly presents a true forecast.

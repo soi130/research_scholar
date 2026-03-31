@@ -2,9 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import PDFParser from 'pdf2json';
-import { getDb, runSerializedWrite } from './db';
-import { extractMetadataFromPDF } from './ai';
+import { getDb, runInTransaction } from './db';
+import { extractMetadataFromPDF, getActiveExtractionEngine } from './ai';
 import { finishScan, tryStartScan, updateScanProgress } from './scan-state';
+import { normalizeTopicSentiment } from './topic-sentiment';
 
 type PdfTextToken = { T: string };
 type PdfTextLine = { R: PdfTextToken[] };
@@ -12,6 +13,15 @@ type PdfPage = { Texts: PdfTextLine[] };
 type PdfReadyPayload = { Pages: PdfPage[] };
 type PdfErrorPayload = Error | { parserError: Error };
 type ExtractedMetadata = Awaited<ReturnType<typeof extractMetadataFromPDF>>;
+type KeyCallRow = {
+  publish_date: string;
+  indicator: string;
+  house: string;
+  value: string;
+  unit: string;
+  forecast_period: string;
+  source_text: string;
+};
 
 function shouldIgnoreEntry(name: string) {
   return name.startsWith('.');
@@ -37,6 +47,51 @@ function collectPdfFiles(folderPath: string): string[] {
   }
 
   return pdfFiles.sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeString(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function normalizeKeyFindings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeString(item))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function normalizeForecasts(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, raw]) => [normalizeString(key), normalizeString(raw)])
+      .filter(([key, raw]) => key && raw)
+  );
+}
+
+function normalizeKeyCalls(value: unknown, defaults: { publish_date: string; house: string }): KeyCallRow[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((row) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+      const record = row as Record<string, unknown>;
+      const indicator = normalizeString(record.indicator);
+      const rowValue = normalizeString(record.value);
+      if (!indicator || !rowValue) return null;
+
+      return {
+        publish_date: normalizeString(record.publish_date) || defaults.publish_date,
+        indicator,
+        house: normalizeString(record.house) || defaults.house,
+        value: rowValue,
+        unit: normalizeString(record.unit),
+        forecast_period: normalizeString(record.forecast_period),
+        source_text: normalizeString(record.source_text),
+      };
+    })
+    .filter((row): row is KeyCallRow => Boolean(row));
 }
 
 async function extractTextFromPDF(filepath: string): Promise<string> {
@@ -67,6 +122,7 @@ async function extractTextFromPDF(filepath: string): Promise<string> {
                 text += t.T + " ";
               }
             }
+            text += "\n";
           }
           text += "\n";
         }
@@ -122,24 +178,135 @@ export async function ingestPaper(filepath: string) {
       return { status: 'failed' as const, reason: 'ai' };
     }
 
-    await runSerializedWrite(async (database) => {
-      await database.run(`
+    const normalizedTitle = normalizeString(result.title) || filename;
+    const normalizedPublishedDate = normalizeString(result.published_date);
+    const normalizedPublisher = normalizeString(result.publisher);
+    const normalizedSummary = normalizeString(result.abstract);
+    const normalizedKeyFindings = normalizeKeyFindings(result.key_findings);
+    const normalizedForecasts = normalizeForecasts((result as Record<string, unknown>).forecasts);
+    const normalizedKeyCalls = normalizeKeyCalls((result as Record<string, unknown>).key_calls, {
+      publish_date: normalizedPublishedDate,
+      house: normalizedPublisher,
+    });
+    const normalizedTopicSentiment = normalizeTopicSentiment(
+      (result as Record<string, unknown>).topic_labels,
+      (result as Record<string, unknown>).topic_summary
+    );
+    const extractionEngine = getActiveExtractionEngine();
+    const extractionPayload = {
+      ...result,
+      title: normalizedTitle,
+      published_date: normalizedPublishedDate,
+      publisher: normalizedPublisher,
+      abstract: normalizedSummary,
+      key_findings: normalizedKeyFindings,
+      forecasts: normalizedForecasts,
+      key_calls: normalizedKeyCalls,
+      topic_labels: normalizedTopicSentiment.labels,
+      topic_summary: normalizedTopicSentiment.summary,
+      filepath,
+      filename,
+      hash,
+    };
+
+    await runInTransaction(async (database) => {
+      const insertResult = await database.run(`
         INSERT INTO papers (
-          hash, filename, filepath, title, authors, published_date, publisher, series_name, journal, abstract, key_findings, tags, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          hash, filename, filepath, title, authors, published_date, publisher, series_name, journal, abstract, key_findings, forecasts, topic_labels, topic_summary, tags, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         hash, filename, filepath,
-        result.title || filename,
+        normalizedTitle,
         JSON.stringify(result.authors || []),
-        result.published_date || '',
-        result.publisher || '',
-        result.series_name || '',
-        result.journal || '',
-        result.abstract || '',
-        JSON.stringify(result.key_findings || []),
+        normalizedPublishedDate,
+        normalizedPublisher,
+        normalizeString(result.series_name),
+        normalizeString(result.journal),
+        normalizedSummary,
+        JSON.stringify(normalizedKeyFindings),
+        JSON.stringify(normalizedForecasts),
+        JSON.stringify(normalizedTopicSentiment.labels),
+        JSON.stringify(normalizedTopicSentiment.summary),
         JSON.stringify(result.tags || []),
         'pending'
       ]);
+
+      const paperId = Number(insertResult.lastID);
+      if (!Number.isFinite(paperId)) return;
+
+      const extractionResult = await database.run(
+        `
+          INSERT INTO paper_extractions (
+            paper_id, file_hash, provider, model, prompt_version, extraction_payload
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [
+          paperId,
+          hash,
+          extractionEngine.provider,
+          extractionEngine.model,
+          extractionEngine.promptVersion,
+          JSON.stringify(extractionPayload),
+        ]
+      );
+
+      const extractionId = Number(extractionResult.lastID);
+
+      await database.run(
+        `UPDATE papers
+         SET forecasts = ?, topic_labels = ?, topic_summary = ?, latest_extraction_id = ?
+         WHERE id = ?`,
+        [
+          JSON.stringify(normalizedForecasts),
+          JSON.stringify(normalizedTopicSentiment.labels),
+          JSON.stringify(normalizedTopicSentiment.summary),
+          Number.isFinite(extractionId) ? extractionId : null,
+          paperId,
+        ]
+      );
+
+      for (const topicLabel of normalizedTopicSentiment.labels) {
+        await database.run(
+          `
+            INSERT INTO paper_topic_labels (
+              paper_id, topic_code, relevance, direction, confidence, evidence, regime, drivers, display_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            paperId,
+            topicLabel.topic,
+            topicLabel.relevance,
+            topicLabel.direction,
+            topicLabel.confidence,
+            topicLabel.evidence,
+            topicLabel.regime || null,
+            JSON.stringify(topicLabel.drivers || []),
+            JSON.stringify(topicLabel.display || {}),
+          ]
+        );
+      }
+
+      for (const keyCall of normalizedKeyCalls) {
+        await database.run(
+          `
+            INSERT INTO paper_key_calls (
+              paper_id, paper_name, filepath, publish_date, indicator, house, value, unit, forecast_period, source_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            paperId,
+            normalizedTitle,
+            filepath,
+            keyCall.publish_date,
+            keyCall.indicator,
+            keyCall.house,
+            keyCall.value,
+            keyCall.unit,
+            keyCall.forecast_period,
+            keyCall.source_text,
+          ]
+        );
+      }
     });
     
     console.log(`[INGEST] Success: ${filename}`);

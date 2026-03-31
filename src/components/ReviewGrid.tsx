@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useEffectEvent } from 'react';
-import { Check, Edit3, Save, X, Loader2, Sparkles, Plus, Tag as TagIcon, Eye, Building2, Calendar } from 'lucide-react';
+import { Check, Edit3, Save, X, Loader2, Sparkles, Plus, Tag as TagIcon, Building2, Calendar, FolderKanban } from 'lucide-react';
 import { MULTI_SELECT_SEARCH_FIELDS, type AdvancedSearchFilters } from '@/lib/search';
+import type { TopicLabel, TopicSummary } from '@/lib/topic-sentiment';
+import TopicSentimentPanel from './TopicSentimentPanel';
 
 interface Paper {
   id: number;
@@ -16,9 +18,17 @@ interface Paper {
   tags: string[];
   key_findings: string[];
   forecasts: Record<string, unknown>;
+  topic_labels: TopicLabel[];
+  topic_summary: TopicSummary;
   status: string;
   updated_at: string;
 }
+
+type ScanState = {
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  message: string | null;
+  stats: { total: number; processed: number; succeeded: number; failed: number };
+};
 
 const renderValue = (v: unknown): string => {
   if (v === null || v === undefined) return '';
@@ -42,7 +52,23 @@ function appendAdvancedSearchParams(params: URLSearchParams, filters: AdvancedSe
   if (filters.published_to) params.set('published_to', filters.published_to);
 }
 
-export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilters }: { onOpenViewer?: (id: number) => void, searchQuery?: string, searchFilters: AdvancedSearchFilters }) {
+export default function ReviewGrid({
+  onOpenViewer,
+  searchQuery = '',
+  searchFilters,
+  onSyncAssets,
+  isScanning = false,
+  scanState = null,
+  scanMessage = '',
+}: {
+  onOpenViewer?: (id: number) => void;
+  searchQuery?: string;
+  searchFilters: AdvancedSearchFilters;
+  onSyncAssets?: () => void;
+  isScanning?: boolean;
+  scanState?: ScanState | null;
+  scanMessage?: string;
+}) {
   const PAGE_SIZE = 30;
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,19 +215,22 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilte
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-violet-500 w-10 h-10" /></div>;
 
-  if (papers.length === 0) return (
-    <div className="text-slate-400 text-center p-20 glass rounded-[2.5rem] border-dashed border-2 border-slate-200">
-       <Sparkles size={48} className="mx-auto text-violet-200 mb-6" />
-       <h3 className="text-xl font-bold text-slate-900 mb-2">Queue is Empty</h3>
-       <p className="max-w-xs mx-auto text-sm">All discovered papers have been verified. New PDFs will appear here automatically.</p>
-    </div>
-  );
-
   return (
     <div className="space-y-10">
       {actionMessage ? (
         <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700">
           {actionMessage}
+        </div>
+      ) : null}
+      {(scanMessage || scanState?.status === 'running' || scanState?.status === 'failed') ? (
+        <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${
+          scanState?.status === 'failed'
+            ? 'border-red-200 bg-red-50 text-red-600'
+            : 'border-slate-200 bg-slate-50 text-slate-600'
+        }`}>
+          {scanState?.status === 'running'
+            ? `${scanState.message || 'Scan in progress'}${scanState.stats.total ? ` (${scanState.stats.processed}/${scanState.stats.total})` : ''}`
+            : scanMessage || scanState?.message}
         </div>
       ) : null}
       <div className="flex justify-between items-center gap-6">
@@ -240,33 +269,51 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilte
         </div>
 
         {/* Bulk Actions */}
-        {papers.length > 0 && (
         <div className="glass p-6 rounded-3xl border border-slate-200/50 flex items-center shadow-lg shadow-slate-200/20 flex-shrink-0">
-            <button 
-              onClick={handleApproveAll}
-              className="px-8 py-2.5 bg-red-500 hover:bg-red-600 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-red-500/20 flex items-center gap-2 text-sm font-black tracking-widest uppercase"
-            >
-              <Check size={18} strokeWidth={3} /> Approve All
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onSyncAssets}
+                disabled={isScanning}
+                className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-violet-600/20 flex items-center gap-2 text-sm font-black tracking-widest uppercase disabled:opacity-50"
+              >
+                {isScanning ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+                Sync Assets
+              </button>
+              {papers.length > 0 ? (
+                <button 
+                  onClick={handleApproveAll}
+                  className="px-8 py-2.5 bg-red-500 hover:bg-red-600 active:scale-95 text-white rounded-xl transition-all shadow-lg shadow-red-500/20 flex items-center gap-2 text-sm font-black tracking-widest uppercase"
+                >
+                  <Check size={18} strokeWidth={3} /> Approve All
+                </button>
+              ) : null}
+            </div>
           </div>
-        )}
       </div>
 
       <div className="flex flex-col gap-8">
-        {papers.map((paper) => (
-          <div key={paper.id} className="glass group relative p-6 rounded-[2.5rem] border border-slate-200/50 hover:border-violet-500/30 hover:bg-[var(--surface-strong)] transition-all duration-500 shadow-sm hover:shadow-2xl hover:shadow-violet-500/5 flex gap-8 items-center overflow-hidden">
-            
-            {/* 1st Page Preview (List Mode) */}
-            <div className="relative w-48 aspect-[3/4] bg-[var(--surface-soft)] rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all cursor-pointer shadow-inner flex-shrink-0" onClick={() => onOpenViewer?.(paper.id)}>
-               <PdfThumbnail paperId={paper.id} className="w-full h-full" />
-               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-4">
-                  <div className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-lg text-slate-900 text-[10px] font-black shadow-xl">
-                    EXPAND
-                  </div>
-               </div>
-            </div>
+        {papers.length === 0 ? (
+          <div className="text-slate-400 text-center p-20 glass rounded-[2.5rem] border-dashed border-2 border-slate-200">
+            <Sparkles size={48} className="mx-auto text-violet-200 mb-6" />
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Queue is Empty</h3>
+            <p className="max-w-xs mx-auto text-sm">All discovered papers have been verified. New PDFs will appear here automatically.</p>
+          </div>
+        ) : papers.map((paper) => (
+          <div key={paper.id} className="glass group relative p-6 rounded-[2.5rem] border border-slate-200/50 hover:border-violet-500/30 hover:bg-[var(--surface-strong)] transition-all duration-500 shadow-sm hover:shadow-2xl hover:shadow-violet-500/5 overflow-hidden space-y-6">
+            <div className="flex gap-8 items-start">
+              <div className="w-72 flex-shrink-0">
+                {/* 1st Page Preview (List Mode) */}
+                <div className="relative w-full aspect-[3/4] bg-[var(--surface-soft)] rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all cursor-pointer shadow-inner" onClick={() => onOpenViewer?.(paper.id)}>
+                   <PdfThumbnail paperId={paper.id} className="w-full h-full" />
+                   <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-4">
+                      <div className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-lg text-slate-900 text-[10px] font-black shadow-xl">
+                        EXPAND
+                      </div>
+                   </div>
+                </div>
+              </div>
 
-            <div className="flex-1 min-w-0 space-y-4">
+              <div className="flex-1 min-w-0 space-y-4">
                <div className="flex justify-between items-start gap-4">
                   <div className="flex-1">
                     {editingId === paper.id ? (
@@ -288,7 +335,15 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilte
                         <button onClick={() => setEditingId(null)} className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-200 transition-all"><X size={18} /></button>
                       </>
                     ) : (
-                      <button onClick={() => { setEditingId(paper.id); setEditValues(paper); setTagInputValue(''); }} className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-violet-50 hover:text-violet-600 transition-all"><Edit3 size={18} /></button>
+                      <>
+                        <button
+                          onClick={() => handleApprove(paper.id)}
+                          className="px-4 py-2 bg-slate-900 text-white rounded-xl font-black text-[10px] hover:bg-violet-600 shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
+                        >
+                          <Check size={14} /> APPROVE
+                        </button>
+                        <button onClick={() => { setEditingId(paper.id); setEditValues(paper); setTagInputValue(''); }} className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-violet-50 hover:text-violet-600 transition-all"><Edit3 size={18} /></button>
+                      </>
                     ) }
                   </div>
                </div>
@@ -316,6 +371,18 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilte
                       />
                     ) : (
                       <span className="font-bold text-slate-900">{paper.published_date || 'N/A'}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-slate-200/30">
+                    <span className="text-slate-400 font-black uppercase tracking-widest"><FolderKanban size={10} className="inline mr-1" /> SERIES:</span>
+                    {editingId === paper.id ? (
+                      <input
+                        className="bg-[var(--surface-strong)] border border-violet-500/30 rounded px-2 py-0.5 text-slate-900 font-bold outline-none"
+                        value={editValues.series_name || ''}
+                        onChange={e => setEditValues({ ...editValues, series_name: e.target.value })}
+                      />
+                    ) : (
+                      <span className="font-bold text-slate-900">{paper.series_name || 'N/A'}</span>
                     )}
                   </div>
                   <div className="flex-1 flex flex-wrap gap-2">
@@ -386,35 +453,78 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilte
                   </div>
                </div>
 
-               <div className="grid grid-cols-4 gap-4 p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)]">
-                  {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
-                    <div key={k} className="space-y-0.5 min-w-0">
-                      <span className="text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate block">{k}</span>
-                      <span className="text-[11px] text-slate-900 font-bold truncate block">{renderValue(v)}</span>
+               <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.95fr] gap-4">
+                  <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                    <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">Summary</p>
+                    {editingId === paper.id ? (
+                      <textarea
+                        className="w-full min-h-28 bg-[var(--surface-strong)] border border-violet-500/30 rounded-xl p-3 text-sm text-slate-900 outline-none"
+                        value={editValues.abstract || ''}
+                        onChange={(e) => setEditValues({ ...editValues, abstract: e.target.value })}
+                      />
+                    ) : (
+                      <p className="text-sm leading-6 text-slate-700">
+                        {paper.abstract || 'No summary extracted yet.'}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                    <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">3 KTAs</p>
+                    {editingId === paper.id ? (
+                      <div className="space-y-2">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                          <textarea
+                            key={index}
+                            className="w-full min-h-16 bg-[var(--surface-strong)] border border-violet-500/30 rounded-xl p-3 text-sm text-slate-900 outline-none"
+                            value={(editValues.key_findings || ['', '', ''])[index] || ''}
+                            onChange={(e) => {
+                              const next = [...(editValues.key_findings || ['', '', ''])];
+                              next[index] = e.target.value;
+                              setEditValues({ ...editValues, key_findings: next.slice(0, 3) });
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : paper.key_findings.length > 0 ? (
+                      <ol className="space-y-2">
+                        {paper.key_findings.slice(0, 3).map((finding, index) => (
+                          <li key={`${paper.id}-${index}`} className="flex gap-3 text-sm text-slate-700">
+                            <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-black flex items-center justify-center flex-shrink-0">
+                              {index + 1}
+                            </span>
+                            <span className="leading-6">{finding}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="text-sm text-slate-400">No key takeaways extracted yet.</p>
+                    )}
                     </div>
-                  ))}
-                  {Object.keys(paper.forecasts || {}).length === 0 && <p className="text-[9px] text-slate-300 italic col-span-4">No specific forecasts extracted.</p>}
+
+                    <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                      <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600 mb-2">Forecast Numbers</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
+                          <div key={k} className="space-y-0.5 min-w-0">
+                            <span className="text-[10px] text-slate-500 font-black uppercase tracking-tight truncate block">{k}</span>
+                            <span className="text-[11px] text-slate-900 font-bold truncate block">{renderValue(v)}</span>
+                          </div>
+                        ))}
+                        {Object.keys(paper.forecasts || {}).length === 0 && <p className="text-[9px] text-slate-300 italic col-span-2">No specific forecasts extracted.</p>}
+                      </div>
+                    </div>
+                  </div>
                </div>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-2 w-48 pl-8 border-l border-[color:var(--border)]">
-               {editingId !== paper.id && (
-                  <>
-                    <button 
-                      onClick={() => handleApprove(paper.id)} 
-                      className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] hover:bg-violet-600 shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
-                    >
-                      <Check size={14} /> APPROVE
-                    </button>
-                    <button 
-                      onClick={() => onOpenViewer?.(paper.id)}
-                      className="w-full py-3 bg-[var(--surface-muted)] text-[var(--foreground)] rounded-2xl font-black text-[10px] hover:bg-[var(--surface-soft)] hover:text-violet-700 transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
-                    >
-                      <Eye size={14} /> VIEW PDF
-                    </button>
-                  </>
-               )}
-            </div>
+            {(paper.topic_labels || []).some((label) => label.relevance > 0) ? (
+              <div className="w-full">
+                <TopicSentimentPanel topicLabels={paper.topic_labels || []} topicSummary={paper.topic_summary} />
+              </div>
+            ) : null}
           </div>
         ))}
       </div>

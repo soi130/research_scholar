@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useEffectEvent } from 'react';
-import { MessageSquare, ExternalLink, Loader2, Check } from 'lucide-react';
+import { MessageSquare, ExternalLink, Loader2, Check, FolderKanban } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { MULTI_SELECT_SEARCH_FIELDS, type AdvancedSearchFilters } from '@/lib/search';
+import type { TopicLabel, TopicSummary } from '@/lib/topic-sentiment';
+import TopicSentimentPanel from './TopicSentimentPanel';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,8 +19,11 @@ interface Paper {
   series_name: string;
   published_date: string;
   abstract: string;
+  key_findings: string[];
   tags: string[];
   forecasts: Record<string, string>;
+  topic_labels: TopicLabel[];
+  topic_summary: TopicSummary;
   filename: string;
 }
 
@@ -127,7 +132,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
           <div 
             key={paper.id} 
             onClick={() => handleCardClick(paper.id)}
-            className={`glass group relative p-5 rounded-3xl border transition-all cursor-pointer flex gap-6 items-center overflow-hidden ${
+            className={`glass group relative p-5 rounded-3xl border transition-all cursor-pointer flex gap-6 items-start overflow-hidden ${
               selected.includes(paper.id) 
                 ? 'border-violet-500/30 bg-violet-500/5 ring-1 ring-violet-500/10' 
                 : 'border-slate-200/50 hover:border-violet-500/20 hover:bg-[var(--surface-strong)] active:scale-[0.99]'
@@ -163,6 +168,14 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
                 </div>
               </div>
 
+              {paper.series_name ? (
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-[color:var(--border)] w-fit">
+                  <FolderKanban size={12} className="text-violet-600" />
+                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Series</span>
+                  <span className="text-[11px] font-bold text-slate-800">{paper.series_name}</span>
+                </div>
+              ) : null}
+
               {paper.forecasts && Object.keys(paper.forecasts).length > 0 && (
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                   {Object.entries(paper.forecasts).slice(0, 5).map(([k, v]) => (
@@ -173,6 +186,45 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
                   ))}
                 </div>
               )}
+
+              <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.9fr] gap-4">
+                <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Summary</p>
+                  <p className="text-sm leading-6 text-slate-700">
+                    {paper.abstract || 'No summary available.'}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">3 KTAs</p>
+                  {paper.key_findings && paper.key_findings.length > 0 ? (
+                    <ol className="space-y-2">
+                      {paper.key_findings.slice(0, 3).map((finding, index) => (
+                        <li key={`${paper.id}-${index}`} className="flex gap-3 text-sm text-slate-700">
+                          <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-black flex items-center justify-center flex-shrink-0">
+                            {index + 1}
+                          </span>
+                          <span className="leading-6">{finding}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="text-sm text-slate-400">No key takeaways available.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-4 p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)]">
+                {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
+                  <div key={k} className="space-y-0.5 min-w-0">
+                    <span className="text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate block">{k}</span>
+                    <span className="text-[11px] text-slate-900 font-bold truncate block">{renderValue(v)}</span>
+                  </div>
+                ))}
+                {Object.keys(paper.forecasts || {}).length === 0 && <p className="text-[9px] text-slate-300 italic col-span-4">No specific forecasts extracted.</p>}
+              </div>
+
+              <TopicSentimentPanel topicLabels={paper.topic_labels || []} topicSummary={paper.topic_summary} />
 
               {paper.tags && paper.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pt-1">
