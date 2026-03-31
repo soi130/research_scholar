@@ -148,7 +148,7 @@ export async function GET(request: Request) {
     const { clause, params } = buildSearchClause(centeredTerms);
 
     if (clause) {
-      const related = await db.all<PaperGraphSource>(
+      const relatedRows = await db.all<PaperGraphSource & { created_at?: string | null }>(
         `
           SELECT id, title, authors, publisher, series_name, published_date, abstract, tags, status, created_at
           FROM papers
@@ -160,6 +160,7 @@ export async function GET(request: Request) {
         `,
         [status, paperId, ...params, Math.max(limit - 1, 0)]
       );
+      const related = Array.isArray(relatedRows) ? relatedRows : [];
 
       papers = [center, ...related];
     } else {
@@ -197,7 +198,7 @@ export async function GET(request: Request) {
       });
     }
 
-    papers = await db.all<PaperGraphSource & { created_at?: string | null }>(
+    const paperRows = await db.all<PaperGraphSource & { created_at?: string | null }>(
       `
         SELECT id, title, authors, publisher, series_name, published_date, abstract, tags, status, created_at
         FROM papers
@@ -208,6 +209,7 @@ export async function GET(request: Request) {
       `,
       [...params, limit]
     );
+    papers = Array.isArray(paperRows) ? paperRows : [];
     papers = applyTemporalFilters(papers, { from, to, asOf });
   }
 

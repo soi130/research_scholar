@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useEffectEvent } from 'react';
 import { MessageSquare, ExternalLink, Loader2, Check } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { MULTI_SELECT_SEARCH_FIELDS, type AdvancedSearchFilters } from '@/lib/search';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -33,10 +34,21 @@ const renderValue = (v: unknown): string => {
 
 import PdfThumbnail from './PdfThumbnail';
 
-export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery = '' }: { 
+function appendAdvancedSearchParams(params: URLSearchParams, filters: AdvancedSearchFilters) {
+  for (const field of MULTI_SELECT_SEARCH_FIELDS) {
+    if (filters[field].length > 0) {
+      params.set(field, JSON.stringify(filters[field]));
+    }
+  }
+  if (filters.published_from) params.set('published_from', filters.published_from);
+  if (filters.published_to) params.set('published_to', filters.published_to);
+}
+
+export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery = '', searchFilters }: { 
   onSelectForChat: (ids: number[]) => void,
   onOpenViewer?: (id: number) => void,
-  searchQuery?: string
+  searchQuery?: string,
+  searchFilters: AdvancedSearchFilters
 }) {
   const PAGE_SIZE = 40;
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -56,6 +68,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
       offset: String(nextOffset),
     });
     if (query.trim()) params.set('q', query.trim());
+    appendAdvancedSearchParams(params, searchFilters);
     const res = await fetch(`/api/papers?${params.toString()}`);
     const data = await res.json();
     const incoming = Array.isArray(data?.items) ? data.items : [];
@@ -67,12 +80,16 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
     setLoadingMore(false);
   };
 
+  const refreshPapers = useEffectEvent((query: string) => {
+    void fetchPapers({ nextOffset: 0, append: false, query });
+  });
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      void fetchPapers({ nextOffset: 0, append: false, query: searchQuery });
+      refreshPapers(searchQuery);
     }, 250);
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, searchFilters]);
 
   const toggleSelect = (id: number) => {
     const newSelected = selected.includes(id) 

@@ -1,8 +1,8 @@
 import chokidar from 'chokidar';
-import path from 'path';
+import type { FSWatcher } from 'chokidar';
 import { ingestPaper } from './ingest';
 
-let watcher: chokidar.FSWatcher | null = null;
+let watcher: FSWatcher | null = null;
 
 export function startWatcher(folderPath: string) {
   if (watcher) return;
@@ -19,9 +19,9 @@ export function startWatcher(folderPath: string) {
   });
 
   watcher.on('add', (filePath) => {
-    if (filePath.endsWith('.pdf')) {
+    if (filePath.toLowerCase().endsWith('.pdf')) {
       console.log(`File added: ${filePath}`);
-      ingestPaper(filePath);
+      void ingestPaper(filePath);
     }
   });
 

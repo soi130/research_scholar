@@ -1,26 +1,81 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, Library, MessageSquareShare, Settings, Search, RefreshCw, Loader2, ChevronLeft, ChevronRight, Share2, Moon, SunMedium } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  LayoutDashboard,
+  Library,
+  MessageSquareShare,
+  Settings,
+  Search,
+  RefreshCw,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Share2,
+  Moon,
+  SunMedium,
+  LogOut,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import ReviewGrid from './ReviewGrid';
 import LibraryView from './LibraryView';
 import ChatPanel from './ChatPanel';
 import GraphView from './GraphView';
+import MultiSelectDropdown from './MultiSelectDropdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import {
+  createDefaultAdvancedSearchDraft,
+  createEmptyAdvancedSearchFilters,
+  DEFAULT_PUBLISHED_FROM,
+  DEFAULT_PUBLISHED_TO,
+  type AdvancedSearchFilters,
+  type MultiSelectSearchField,
+  type SearchOptions,
+} from '@/lib/search';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function dateToSliderValue(date: string) {
+  return Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 86400000);
+}
+
+function sliderValueToDate(value: number) {
+  return new Date(value * 86400000).toISOString().slice(0, 10);
+}
+
 export default function DashboardLayout() {
   type View = 'library' | 'review' | 'chat' | 'search' | 'graph';
   type Theme = 'light' | 'dark';
+  type ScanState = {
+    status: 'idle' | 'running' | 'completed' | 'failed';
+    message: string | null;
+    stats: { total: number; processed: number; succeeded: number; failed: number };
+  };
+
   const [view, setView] = useState<View>('library');
   const [isScanning, setIsScanning] = useState(false);
+  const [scanState, setScanState] = useState<ScanState | null>(null);
+  const [scanMessage, setScanMessage] = useState('');
   const [selectedPaperIds, setSelectedPaperIds] = useState<number[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [searchOptions, setSearchOptions] = useState<SearchOptions>({
+    authors: [],
+    publisher: [],
+    series_name: [],
+    tags: [],
+    dateBounds: {
+      min: DEFAULT_PUBLISHED_FROM,
+      max: DEFAULT_PUBLISHED_TO,
+    },
+  });
+  const [draftSearchFilters, setDraftSearchFilters] = useState<AdvancedSearchFilters>(createDefaultAdvancedSearchDraft());
+  const [searchFilters, setSearchFilters] = useState<AdvancedSearchFilters>(createEmptyAdvancedSearchFilters());
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === 'undefined') return 'light';
     const storedTheme = window.localStorage.getItem('scholar-theme');
@@ -39,10 +94,91 @@ export default function DashboardLayout() {
     window.localStorage.setItem('scholar-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadScanState = async () => {
+      try {
+        const res = await fetch('/api/scan');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!active) return;
+        setScanState(data);
+        setIsScanning(data?.status === 'running');
+      } catch {
+        if (active) setIsScanning(false);
+      }
+    };
+
+    void loadScanState();
+    const intervalId = window.setInterval(() => {
+      void loadScanState();
+    }, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSearchOptions = async () => {
+      try {
+        const res = await fetch('/api/search-options');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!active) return;
+
+        const nextOptions: SearchOptions = {
+          authors: Array.isArray(data?.authors) ? data.authors : [],
+          publisher: Array.isArray(data?.publisher) ? data.publisher : [],
+          series_name: Array.isArray(data?.series_name) ? data.series_name : [],
+          tags: Array.isArray(data?.tags) ? data.tags : [],
+          dateBounds: {
+            min: data?.dateBounds?.min || DEFAULT_PUBLISHED_FROM,
+            max: data?.dateBounds?.max || DEFAULT_PUBLISHED_TO,
+          },
+        };
+        setSearchOptions(nextOptions);
+        setDraftSearchFilters((current) => ({
+          ...current,
+          published_from: current.published_from || DEFAULT_PUBLISHED_FROM,
+          published_to: current.published_to || DEFAULT_PUBLISHED_TO,
+        }));
+      } catch {
+        // Keep defaults if options fail to load.
+      }
+    };
+
+    void loadSearchOptions();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const handleScan = async () => {
+    setScanMessage('');
     setIsScanning(true);
-    await fetch('/api/papers', { method: 'POST' });
-    setIsScanning(false);
+    const res = await fetch('/api/papers', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+      setScanMessage(data?.message || 'A scan is already running.');
+      setScanState(data?.state || null);
+      setIsScanning(true);
+      return;
+    }
+    if (!res.ok) {
+      setScanMessage(data?.message || 'Unable to start scan.');
+      setIsScanning(false);
+      return;
+    }
+    setScanMessage(data?.message || 'Scan started.');
+    const stateRes = await fetch('/api/scan');
+    const stateData = await stateRes.json().catch(() => null);
+    if (stateData) setScanState(stateData);
   };
 
   const applyTheme = (nextTheme: Theme) => {
@@ -54,6 +190,71 @@ export default function DashboardLayout() {
   };
 
   const toggleTheme = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
+
+  const updateDraftMultiSelect = (field: MultiSelectSearchField, values: string[]) => {
+    setDraftSearchFilters((current) => ({
+      ...current,
+      [field]: values,
+    }));
+  };
+
+  const resetAdvancedSearch = () => {
+    setDraftSearchFilters(createDefaultAdvancedSearchDraft());
+    setSearchFilters(createEmptyAdvancedSearchFilters());
+  };
+
+  const applyAdvancedSearch = () => {
+    setSearchFilters({
+      authors: [...draftSearchFilters.authors],
+      publisher: [...draftSearchFilters.publisher],
+      series_name: [...draftSearchFilters.series_name],
+      tags: [...draftSearchFilters.tags],
+      published_from: draftSearchFilters.published_from,
+      published_to: draftSearchFilters.published_to,
+    });
+  };
+
+  const activeAdvancedFilterCount = useMemo(() => {
+    let count = 0;
+    count += searchFilters.authors.length;
+    count += searchFilters.publisher.length;
+    count += searchFilters.series_name.length;
+    count += searchFilters.tags.length;
+    if (searchFilters.published_from || searchFilters.published_to) count += 1;
+    return count;
+  }, [searchFilters]);
+
+  const hasActiveSearch = searchQuery.trim().length > 0 || activeAdvancedFilterCount > 0;
+
+  const sliderBounds = useMemo(() => {
+    const min = dateToSliderValue(searchOptions.dateBounds.min);
+    const max = dateToSliderValue(searchOptions.dateBounds.max);
+    return { min, max };
+  }, [searchOptions.dateBounds.max, searchOptions.dateBounds.min]);
+
+  const draftFromValue = Math.max(sliderBounds.min, Math.min(sliderBounds.max, dateToSliderValue(draftSearchFilters.published_from || DEFAULT_PUBLISHED_FROM)));
+  const draftToValue = Math.max(sliderBounds.min, Math.min(sliderBounds.max, dateToSliderValue(draftSearchFilters.published_to || DEFAULT_PUBLISHED_TO)));
+
+  const handleDateSliderChange = (field: 'published_from' | 'published_to', sliderValue: number) => {
+    const nextDate = sliderValueToDate(sliderValue);
+    setDraftSearchFilters((current) => {
+      const currentFrom = dateToSliderValue(current.published_from || DEFAULT_PUBLISHED_FROM);
+      const currentTo = dateToSliderValue(current.published_to || DEFAULT_PUBLISHED_TO);
+      if (field === 'published_from') {
+        const clamped = Math.min(sliderValue, currentTo);
+        return { ...current, published_from: sliderValueToDate(clamped) };
+      }
+      const clamped = Math.max(sliderValue, currentFrom);
+      return { ...current, published_to: sliderValueToDate(clamped) };
+    });
+    return nextDate;
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  };
+
   const openPdfInNewWindow = (id: number) => {
     const pdfUrl = `/api/papers/${id}/serve`;
     const width = Math.max(960, Math.min(window.screen.availWidth - 80, 1320));
@@ -88,13 +289,13 @@ export default function DashboardLayout() {
 
   return (
     <div className="h-screen bg-[var(--background)] text-[var(--foreground)] font-sans selection:bg-violet-500/20 flex overflow-hidden">
-      {/* 1. Collapsible Sidebar */}
-      <aside className={cn(
-        "glass border-r border-[color:var(--border)] flex flex-col transition-all duration-300 z-50 flex-shrink-0 relative shadow-sm",
-        isCollapsed ? "w-20" : "w-64"
-      )}>
-        {/* Toggle Button */}
-        <button 
+      <aside
+        className={cn(
+          'glass border-r border-[color:var(--border)] flex flex-col transition-all duration-300 z-50 flex-shrink-0 relative shadow-sm',
+          isCollapsed ? 'w-20' : 'w-64'
+        )}
+      >
+        <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="absolute -right-3 top-24 w-6 h-6 bg-[var(--surface-strong)] border border-[color:var(--border)] rounded-full flex items-center justify-center shadow-lg hover:text-violet-600 transition-colors z-50 text-slate-400"
         >
@@ -114,43 +315,54 @@ export default function DashboardLayout() {
 
         <nav className="flex-1 px-3 py-6 flex flex-col gap-2 overflow-y-auto no-scrollbar">
           {navItems.map((item) => (
-            <button 
+            <button
               key={item.id}
               onClick={() => setView(item.id)}
               className={cn(
-                "flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
-                view === item.id 
-                  ? 'bg-violet-600/10 text-violet-600 font-bold shadow-sm' 
+                'flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative',
+                view === item.id
+                  ? 'bg-violet-600/10 text-violet-600 font-bold shadow-sm'
                   : 'text-slate-500 hover:text-slate-900 hover:bg-[var(--surface-muted)]'
               )}
               title={isCollapsed ? item.label : ''}
             >
-              <item.icon size={20} className={cn(
-                view === item.id ? 'text-violet-600' : 'text-slate-400 group-hover:text-slate-600',
-                isScanning && item.id === 'review' ? 'animate-spin' : ''
-              )} />
+              <item.icon
+                size={20}
+                className={cn(
+                  view === item.id ? 'text-violet-600' : 'text-slate-400 group-hover:text-slate-600',
+                  isScanning && item.id === 'review' ? 'animate-spin' : ''
+                )}
+              />
               {!isCollapsed && <span className="text-sm tracking-wide">{item.label}</span>}
-              {isCollapsed && (
-                 <div className="absolute left-full ml-4 px-2 py-1 bg-slate-900 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100]">
+              {isCollapsed ? (
+                <div className="absolute left-full ml-4 px-2 py-1 bg-slate-900 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100]">
                   {item.label}
-                 </div>
-              )}
+                </div>
+              ) : null}
             </button>
           ))}
-          </nav>
+        </nav>
 
         <div className="p-3 border-t border-[color:var(--border)] mt-auto flex items-center justify-center gap-2">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 px-3 py-3 text-slate-400 hover:text-red-500 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
+            title="Sign out"
+          >
+            <LogOut size={20} />
+            {!isCollapsed ? <span className="text-[10px] font-black uppercase tracking-[0.2em]">Exit</span> : null}
+          </button>
           <button
             onClick={toggleTheme}
             className="flex items-center gap-2 px-3 py-3 text-slate-400 hover:text-violet-600 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
             title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           >
             {theme === 'dark' ? <SunMedium size={20} /> : <Moon size={20} />}
-            {!isCollapsed && (
+            {!isCollapsed ? (
               <span className="text-[10px] font-black uppercase tracking-[0.2em]">
                 {theme === 'dark' ? 'Light' : 'Dark'}
               </span>
-            )}
+            ) : null}
           </button>
           <button className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-[var(--surface-muted)]">
             <Settings size={20} />
@@ -158,30 +370,173 @@ export default function DashboardLayout() {
         </div>
       </aside>
 
-      {/* 2. Main Scrollable Area */}
       <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 relative bg-[var(--background)]">
-        <header className="h-20 flex items-center justify-between px-10 glass border-b border-[color:var(--border)] flex-shrink-0 sticky top-0 z-40">
-          <div className="relative group w-full max-w-md">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-violet-600 transition-colors" size={18} />
-            <input 
-              type="text" 
-              placeholder="Search papers, authors, tags, or topics..." 
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full bg-[var(--surface-muted)] border border-[color:var(--border)] rounded-2xl py-2.5 pl-12 pr-4 outline-none focus:border-violet-500/30 focus:bg-[var(--surface-strong)] transition-all placeholder:text-slate-400 text-sm shadow-inner"
-            />
+        <header className="px-10 py-6 glass border-b border-[color:var(--border)] flex-shrink-0 sticky top-0 z-40 space-y-4">
+          <div className="flex items-start justify-between gap-6">
+            <div className="w-full max-w-xl space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="relative group flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-violet-600 transition-colors" size={18} />
+                  <input
+                    type="text"
+                    placeholder="Search papers, authors, tags, or topics..."
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    className="w-full bg-[var(--surface-muted)] border border-[color:var(--border)] rounded-2xl py-2.5 pl-12 pr-4 outline-none focus:border-violet-500/30 focus:bg-[var(--surface-strong)] transition-all placeholder:text-slate-400 text-sm shadow-inner"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowAdvancedSearch((current) => !current)}
+                  className={cn(
+                    'px-4 py-2.5 rounded-2xl border text-sm font-bold transition-all flex items-center gap-2',
+                    showAdvancedSearch || activeAdvancedFilterCount > 0
+                      ? 'border-violet-300 bg-violet-50 text-violet-700'
+                      : 'border-[color:var(--border)] bg-[var(--surface-muted)] text-slate-600 hover:text-violet-600'
+                  )}
+                >
+                  <SlidersHorizontal size={16} />
+                  Advanced Search
+                  {activeAdvancedFilterCount > 0 ? (
+                    <span className="min-w-5 h-5 px-1 rounded-full bg-violet-600 text-white text-[10px] font-black flex items-center justify-center">
+                      {activeAdvancedFilterCount}
+                    </span>
+                  ) : null}
+                </button>
+              </div>
+              {(scanMessage || scanState?.status === 'running' || scanState?.status === 'failed') ? (
+                <p className={cn('text-xs font-semibold', scanState?.status === 'failed' ? 'text-red-500' : 'text-slate-500')}>
+                  {scanState?.status === 'running'
+                    ? `${scanState.message || 'Scan in progress'}${scanState.stats.total ? ` (${scanState.stats.processed}/${scanState.stats.total})` : ''}`
+                    : scanMessage || scanState?.message}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex gap-4 items-center justify-end">
+              <button
+                onClick={handleScan}
+                disabled={isScanning}
+                className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-2xl text-sm font-bold transition-all shadow-lg shadow-violet-600/20 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isScanning ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                Sync Assets
+              </button>
+            </div>
           </div>
 
-          <div className="flex gap-4 items-center">
-            <button 
-              onClick={handleScan}
-              disabled={isScanning}
-              className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-2xl text-sm font-bold transition-all shadow-lg shadow-violet-600/20 disabled:opacity-50 flex items-center gap-2"
-            >
-              {isScanning ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
-              Sync Assets
-            </button>
-          </div>
+          {showAdvancedSearch ? (
+            <div className="rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] p-5 shadow-xl shadow-slate-200/20">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-600">Metadata Search</p>
+                  <p className="text-sm text-slate-500">Filter with curated metadata selectors and a publication date range.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={resetAdvancedSearch}
+                    className="px-3 py-2 rounded-xl border border-[color:var(--border)] text-xs font-bold text-slate-500 hover:text-violet-600"
+                  >
+                    Reset Filters
+                  </button>
+                  <button
+                    onClick={applyAdvancedSearch}
+                    className="px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-black uppercase tracking-[0.18em] shadow-lg shadow-violet-600/20"
+                  >
+                    Apply Search
+                  </button>
+                  <button
+                    onClick={() => setShowAdvancedSearch(false)}
+                    className="p-2 rounded-xl border border-[color:var(--border)] text-slate-400 hover:text-slate-700"
+                    title="Close advanced search"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <label className="space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Author</span>
+                  <MultiSelectDropdown
+                    label="Author"
+                    options={searchOptions.authors}
+                    selected={draftSearchFilters.authors}
+                    onChange={(next) => updateDraftMultiSelect('authors', next)}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Publisher</span>
+                  <MultiSelectDropdown
+                    label="Publisher"
+                    options={searchOptions.publisher}
+                    selected={draftSearchFilters.publisher}
+                    onChange={(next) => updateDraftMultiSelect('publisher', next)}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Series Name</span>
+                  <MultiSelectDropdown
+                    label="Series Name"
+                    options={searchOptions.series_name}
+                    selected={draftSearchFilters.series_name}
+                    onChange={(next) => updateDraftMultiSelect('series_name', next)}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Tag</span>
+                  <MultiSelectDropdown
+                    label="Tag"
+                    options={searchOptions.tags}
+                    selected={draftSearchFilters.tags}
+                    onChange={(next) => updateDraftMultiSelect('tags', next)}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-5 py-4">
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Published Date</p>
+                    <p className="text-sm font-semibold text-slate-700">
+                      Between {draftSearchFilters.published_from} and {draftSearchFilters.published_to}
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                    <span>From: {draftSearchFilters.published_from}</span>
+                    <span>To: {draftSearchFilters.published_to}</span>
+                  </div>
+                  <div className="relative pt-4 pb-2">
+                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-2 rounded-full bg-slate-200" />
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full bg-violet-500"
+                      style={{
+                        left: `${((draftFromValue - sliderBounds.min) / Math.max(sliderBounds.max - sliderBounds.min, 1)) * 100}%`,
+                        right: `${100 - ((draftToValue - sliderBounds.min) / Math.max(sliderBounds.max - sliderBounds.min, 1)) * 100}%`,
+                      }}
+                    />
+                    <input
+                      type="range"
+                      min={sliderBounds.min}
+                      max={sliderBounds.max}
+                      value={draftFromValue}
+                      onChange={(event) => handleDateSliderChange('published_from', Number(event.target.value))}
+                      className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-none slider-thumb"
+                    />
+                    <input
+                      type="range"
+                      min={sliderBounds.min}
+                      max={sliderBounds.max}
+                      value={draftToValue}
+                      onChange={(event) => handleDateSliderChange('published_to', Number(event.target.value))}
+                      className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-none slider-thumb"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 custom-scrollbar scroll-smooth">
@@ -195,7 +550,7 @@ export default function DashboardLayout() {
                     ? 'Knowledge Graph'
                     : view === 'search'
                       ? 'Document Exploration'
-                      : 'Financial Insights Multi-Chat'}
+                      : 'Research Multi-Chat'}
             </h1>
             <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
               <span className="w-8 h-px bg-[color:var(--border)]"></span>
@@ -207,79 +562,104 @@ export default function DashboardLayout() {
                     ? 'Trace relationships between papers, authors, tags, publishers, and shared themes.'
                     : view === 'search'
                       ? 'Deep-dive search through every document page.'
-                      : 'Synthesize complex views across multiple houses.'}
+                      : 'Synthesize insights across your selected papers.'}
             </div>
           </div>
 
           <div className="relative animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {(view === 'library' || view === 'review') && (
+            {(view === 'library' || view === 'review') ? (
               <div className="flex flex-col gap-8">
                 {view === 'review' ? (
-                  <ReviewGrid onOpenViewer={openPdfInNewWindow} searchQuery={searchQuery} />
+                  <ReviewGrid onOpenViewer={openPdfInNewWindow} searchQuery={searchQuery} searchFilters={searchFilters} />
                 ) : (
-                  <LibraryView 
-                    onSelectForChat={(ids) => { setSelectedPaperIds(ids); if(ids.length > 0) setView('chat'); }} 
+                  <LibraryView
+                    onSelectForChat={(ids) => {
+                      setSelectedPaperIds(ids);
+                      if (ids.length > 0) setView('chat');
+                    }}
                     onOpenViewer={openPdfInNewWindow}
                     searchQuery={searchQuery}
+                    searchFilters={searchFilters}
                   />
                 )}
               </div>
-            )}
-            {view === 'graph' && (
+            ) : null}
+
+            {view === 'graph' ? (
               <GraphView
                 onOpenViewer={openPdfInNewWindow}
                 searchQuery={searchQuery}
               />
-            )}
-            {view === 'chat' && (
-              <ChatPanel 
-                selectedPaperIds={selectedPaperIds} 
-                onOpenViewer={openPdfInNewWindow} 
+            ) : null}
+
+            {view === 'chat' ? (
+              <ChatPanel
+                selectedPaperIds={selectedPaperIds}
+                onOpenViewer={openPdfInNewWindow}
                 onClearSelection={() => setSelectedPaperIds([])}
                 onOpenLibrary={() => setView('library')}
               />
-            )}
-            {view === 'search' && (
+            ) : null}
+
+            {view === 'search' ? (
               <div className="space-y-8 h-full">
-                {searchQuery.trim() ? (
-                  <LibraryView onSelectForChat={setSelectedPaperIds} onOpenViewer={openPdfInNewWindow} searchQuery={searchQuery} />
+                {hasActiveSearch ? (
+                  <LibraryView
+                    onSelectForChat={setSelectedPaperIds}
+                    onOpenViewer={openPdfInNewWindow}
+                    searchQuery={searchQuery}
+                    searchFilters={searchFilters}
+                  />
                 ) : (
                   <div className="glass p-20 rounded-3xl text-center border-dashed border-2 border-slate-200 text-slate-400">
                     <Search size={48} className="mx-auto text-slate-200 mb-6" />
                     <h3 className="text-xl font-bold text-slate-900 mb-2">Deep Content Search</h3>
-                    <p className="max-w-sm mx-auto text-sm">Use the search bar above to explore paper titles, authors, tags, and abstracts across your entire library.</p>
+                    <p className="max-w-sm mx-auto text-sm">Use quick search, or open Advanced Search to filter by authors, publishers, series, tags, and publication date.</p>
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
 
       <style jsx global>{`
         .glass {
-          background-color: var(--glass-bg);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          border: 1px solid var(--glass-border);
+          background: color-mix(in srgb, var(--surface-strong) 84%, white 16%);
+          backdrop-filter: blur(18px);
         }
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 8px;
+
+        .slider-thumb::-webkit-slider-thumb {
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          border-radius: 9999px;
+          background: #7c3aed;
+          border: 2px solid white;
+          box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+          pointer-events: auto;
+          cursor: pointer;
         }
-        .custom-scrollbar::-webkit-scrollbar-track {
+
+        .slider-thumb::-moz-range-thumb {
+          width: 18px;
+          height: 18px;
+          border-radius: 9999px;
+          background: #7c3aed;
+          border: 2px solid white;
+          box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+          pointer-events: auto;
+          cursor: pointer;
+        }
+
+        .slider-thumb::-webkit-slider-runnable-track {
+          height: 18px;
           background: transparent;
         }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(99, 102, 241, 0.1);
-          border-radius: 10px;
-          border: 2px solid transparent;
-          background-clip: content-box;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background-color: rgba(99, 102, 241, 0.2);
-        }
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
+
+        .slider-thumb::-moz-range-track {
+          height: 18px;
+          background: transparent;
         }
       `}</style>
     </div>

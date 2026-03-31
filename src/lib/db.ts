@@ -4,13 +4,23 @@ import path from 'path';
 import fs from 'fs';
 
 let db: Database | null = null;
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+async function configureDb(database: Database) {
+  await database.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
+    PRAGMA foreign_keys = ON;
+  `);
+}
 
 export async function getDb(): Promise<Database> {
   const dbPath = path.join(process.cwd(), 'papers.db');
   
   if (db && !fs.existsSync(dbPath)) {
     console.log("Database file was deleted, resetting connection...");
-    try { await db.close(); } catch (e) {}
+    try { await db.close(); } catch {}
     db = null;
   }
 
@@ -22,6 +32,8 @@ export async function getDb(): Promise<Database> {
     filename: dbPath,
     driver: sqlite3.Database
   });
+
+  await configureDb(db);
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS papers (
@@ -58,13 +70,13 @@ export async function getDb(): Promise<Database> {
 
   try {
     await db.exec(`ALTER TABLE papers ADD COLUMN publisher TEXT`);
-  } catch (e) {}
+  } catch {}
   try {
     await db.exec(`ALTER TABLE papers ADD COLUMN series_name TEXT`);
-  } catch (e) {}
+  } catch {}
   try {
     await db.exec(`ALTER TABLE papers ADD COLUMN forecasts TEXT`);
-  } catch (e) {}
+  } catch {}
 
   // Full-text search index for scalable paper search and retrieval.
   try {
@@ -119,4 +131,24 @@ export async function getDb(): Promise<Database> {
   }
 
   return db;
+}
+
+export async function runSerializedWrite<T>(operation: (database: Database) => Promise<T>): Promise<T> {
+  const run = writeQueue.then(async () => operation(await getDb()));
+  writeQueue = run.catch(() => undefined);
+  return run;
+}
+
+export async function runInTransaction<T>(operation: (database: Database) => Promise<T>): Promise<T> {
+  return runSerializedWrite(async (database) => {
+    await database.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await operation(database);
+      await database.exec('COMMIT');
+      return result;
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }

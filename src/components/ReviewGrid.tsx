@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useEffectEvent } from 'react';
 import { Check, Edit3, Save, X, Loader2, Sparkles, Plus, Tag as TagIcon, Eye, Building2, Calendar } from 'lucide-react';
+import { MULTI_SELECT_SEARCH_FIELDS, type AdvancedSearchFilters } from '@/lib/search';
 
 interface Paper {
   id: number;
@@ -16,6 +17,7 @@ interface Paper {
   key_findings: string[];
   forecasts: Record<string, unknown>;
   status: string;
+  updated_at: string;
 }
 
 const renderValue = (v: unknown): string => {
@@ -30,7 +32,17 @@ const renderValue = (v: unknown): string => {
 
 import PdfThumbnail from './PdfThumbnail';
 
-export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenViewer?: (id: number) => void, searchQuery?: string }) {
+function appendAdvancedSearchParams(params: URLSearchParams, filters: AdvancedSearchFilters) {
+  for (const field of MULTI_SELECT_SEARCH_FIELDS) {
+    if (filters[field].length > 0) {
+      params.set(field, JSON.stringify(filters[field]));
+    }
+  }
+  if (filters.published_from) params.set('published_from', filters.published_from);
+  if (filters.published_to) params.set('published_to', filters.published_to);
+}
+
+export default function ReviewGrid({ onOpenViewer, searchQuery = '', searchFilters }: { onOpenViewer?: (id: number) => void, searchQuery?: string, searchFilters: AdvancedSearchFilters }) {
   const PAGE_SIZE = 30;
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +55,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
+  const [actionMessage, setActionMessage] = useState('');
 
   const fetchPending = async ({ nextOffset, append, query }: { nextOffset: number; append: boolean; query: string }) => {
     if (append) setLoadingMore(true);
@@ -53,6 +66,7 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
       offset: String(nextOffset),
     });
     if (query.trim()) params.set('q', query.trim());
+    appendAdvancedSearchParams(params, searchFilters);
     const res = await fetch(`/api/papers?${params.toString()}`);
     const data = await res.json();
     const incoming = Array.isArray(data?.items) ? data.items : [];
@@ -70,27 +84,58 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
     setMasterTags(data);
   };
 
+  const refreshPending = useEffectEvent((query: string) => {
+    void fetchPending({ nextOffset: 0, append: false, query });
+  });
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
+      refreshPending(searchQuery);
     }, 250);
     void (async () => {
       await fetchTags();
     })();
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, searchFilters]);
 
   const handleApprove = async (id: number) => {
-    await fetch(`/api/papers/${id}`, { method: 'POST' });
+    const target = papers.find((paper) => paper.id === id);
+    const res = await fetch(`/api/papers/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedUpdatedAt: target?.updated_at || null })
+    });
+    if (res.status === 409) {
+      setActionMessage('That paper changed in another session. The queue has been refreshed.');
+    } else if (!res.ok) {
+      setActionMessage('Approval failed. Please try again.');
+    } else {
+      setActionMessage('Paper approved.');
+    }
     void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
   };
 
   const handleSave = async (id: number) => {
-    await fetch(`/api/papers/${id}`, { 
+    const target = papers.find((paper) => paper.id === id);
+    const res = await fetch(`/api/papers/${id}`, { 
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editValues)
+      body: JSON.stringify({
+        ...editValues,
+        expectedUpdatedAt: target?.updated_at || null,
+      })
     });
+    if (res.status === 409) {
+      setActionMessage('Another reviewer updated this paper first. Your edits were not applied.');
+      setEditingId(null);
+      void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
+      return;
+    }
+    if (!res.ok) {
+      setActionMessage('Save failed. Please try again.');
+      return;
+    }
+    setActionMessage('Paper saved.');
     setEditingId(null);
     void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
   };
@@ -117,8 +162,27 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
   const handleApproveAll = async () => {
     if (!window.confirm(`Are you sure you want to approve all ${papers.length} currently loaded papers in the queue?`)) return;
     setLoading(true);
-    for (const p of papers) {
-      await fetch(`/api/papers/${p.id}`, { method: 'POST' });
+    const res = await fetch('/api/papers/bulk-approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: papers.map((paper) => ({
+          id: paper.id,
+          expectedUpdatedAt: paper.updated_at,
+        })),
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setActionMessage('Bulk approval failed. Please try again.');
+    } else {
+      const approved = Array.isArray(data?.approvedIds) ? data.approvedIds.length : 0;
+      const conflicts = Array.isArray(data?.conflicts) ? data.conflicts.length : 0;
+      setActionMessage(
+        conflicts > 0
+          ? `Approved ${approved} papers. Skipped ${conflicts} changed or already-approved items.`
+          : `Approved ${approved} papers.`
+      );
     }
     void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
   };
@@ -135,6 +199,11 @@ export default function ReviewGrid({ onOpenViewer, searchQuery = '' }: { onOpenV
 
   return (
     <div className="space-y-10">
+      {actionMessage ? (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700">
+          {actionMessage}
+        </div>
+      ) : null}
       <div className="flex justify-between items-center gap-6">
         {/* Global Tag Manager (Light Mode refined) */}
         <div className="glass p-6 rounded-3xl border border-slate-200/50 flex-1 flex gap-4 items-center shadow-lg shadow-slate-200/20">

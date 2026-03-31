@@ -143,8 +143,14 @@ export default function PaperNeighborhoodGraph({
       (node) => secondaryPaperIds.has(node.id) && node.id !== center.id && !relatedPaperNodes.some((paper) => paper.id === node.id)
     );
 
+    const centerNode: MiniNode = {
+      ...center,
+      x: 260,
+      y: 190,
+    };
+
     const visibleNodes = [
-      center,
+      centerNode,
       ...placeRing(metadataNodes, 260, 190, 92, 0),
       ...placeRing([...relatedPaperNodes, ...secondaryPaperNodes], 260, 190, 156, 0),
     ];
@@ -163,7 +169,7 @@ export default function PaperNeighborhoodGraph({
       : [];
 
     return {
-      center,
+      center: centerNode,
       nodes: visibleNodes,
       edges: visibleEdges,
       selected,

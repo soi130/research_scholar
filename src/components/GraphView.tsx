@@ -498,7 +498,7 @@ export default function GraphView({
 
   const clampZoom = (value: number) => Math.min(2.5, Math.max(0.4, value));
 
-  const getPointerInViewBox = (event: React.PointerEvent<SVGSVGElement>) => {
+  const getPointerInViewBox = (event: { clientX: number; clientY: number }) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
