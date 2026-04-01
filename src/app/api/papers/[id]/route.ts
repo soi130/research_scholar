@@ -163,6 +163,43 @@ export async function GET(request: Request, { params }: Params) {
     `,
     [id]
   );
+  const researchFacts = await db.all<Record<string, unknown>[]>(
+    `
+      SELECT
+        id,
+        paper_id,
+        source_house,
+        fact_type,
+        stance,
+        subject,
+        entity_or_scope,
+        metric,
+        value_number,
+        unit,
+        time_reference,
+        evidence_text,
+        evidence_page,
+        confidence,
+        ambiguity_flags,
+        review_status,
+        reviewed_fact_type,
+        reviewed_stance,
+        reviewed_subject,
+        reviewed_entity_or_scope,
+        reviewed_metric,
+        reviewed_value_number,
+        reviewed_unit,
+        reviewed_time_reference,
+        reviewed_by,
+        reviewed_at,
+        created_at,
+        updated_at
+      FROM research_facts
+      WHERE paper_id = ?
+      ORDER BY created_at ASC, id ASC
+    `,
+    [id]
+  );
 
   return NextResponse.json({
     ...paperResponse(paper),
@@ -176,6 +213,17 @@ export async function GET(request: Request, { params }: Params) {
       drivers: label.drivers ? JSON.parse(String(label.drivers)) : [],
       display: label.display_json ? JSON.parse(String(label.display_json)) : {},
       created_at: label.created_at,
+    })),
+    research_facts: researchFacts.map((fact) => ({
+      ...fact,
+      value_number: fact.value_number === null || fact.value_number === undefined ? null : Number(fact.value_number),
+      evidence_page: fact.evidence_page === null || fact.evidence_page === undefined ? null : Number(fact.evidence_page),
+      confidence: Number(fact.confidence || 0),
+      ambiguity_flags: fact.ambiguity_flags ? JSON.parse(String(fact.ambiguity_flags)) : [],
+      reviewed_value_number:
+        fact.reviewed_value_number === null || fact.reviewed_value_number === undefined
+          ? null
+          : Number(fact.reviewed_value_number),
     })),
     latest_extraction: extraction
       ? {

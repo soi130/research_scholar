@@ -16,6 +16,8 @@ import {
   LogOut,
   SlidersHorizontal,
   X,
+  TriangleAlert,
+  Loader2,
 } from 'lucide-react';
 import ReviewGrid from './ReviewGrid';
 import LibraryView from './LibraryView';
@@ -44,6 +46,17 @@ function dateToSliderValue(date: string) {
 
 function sliderValueToDate(value: number) {
   return new Date(value * 86400000).toISOString().slice(0, 10);
+}
+
+function getPreferredTheme(): 'light' | 'dark' {
+  if (typeof window === 'undefined') return 'light';
+
+  const storedTheme = window.localStorage.getItem('scholar-theme');
+  if (storedTheme === 'dark' || storedTheme === 'light') {
+    return storedTheme;
+  }
+
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 export default function DashboardLayout() {
@@ -75,16 +88,19 @@ export default function DashboardLayout() {
   });
   const [draftSearchFilters, setDraftSearchFilters] = useState<AdvancedSearchFilters>(createDefaultAdvancedSearchDraft());
   const [searchFilters, setSearchFilters] = useState<AdvancedSearchFilters>(createEmptyAdvancedSearchFilters());
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'light';
-    const storedTheme = window.localStorage.getItem('scholar-theme');
-    const systemPrefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-    return storedTheme === 'dark' || storedTheme === 'light'
-      ? storedTheme
-      : systemPrefersDark
-        ? 'dark'
-        : 'light';
-  });
+  const [theme, setTheme] = useState<Theme>('light');
+  const [devMode, setDevMode] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isResettingDevData, setIsResettingDevData] = useState(false);
+
+  useEffect(() => {
+    setTheme(getPreferredTheme());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setDevMode(window.localStorage.getItem('scholar-dev-mode') === 'true');
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -182,13 +198,51 @@ export default function DashboardLayout() {
 
   const applyTheme = (nextTheme: Theme) => {
     setTheme(nextTheme);
-    document.documentElement.dataset.theme = nextTheme;
-    document.documentElement.classList.toggle('dark', nextTheme === 'dark');
-    document.documentElement.style.colorScheme = nextTheme;
-    window.localStorage.setItem('scholar-theme', nextTheme);
   };
 
   const toggleTheme = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
+
+  const toggleDevMode = () => {
+    const nextValue = !devMode;
+    setDevMode(nextValue);
+    window.localStorage.setItem('scholar-dev-mode', String(nextValue));
+  };
+
+  const handleResetAndReingest = async () => {
+    const confirmed = window.confirm(
+      'This will wipe the local database and reingest all papers from the configured paper storage. Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsResettingDevData(true);
+    setScanMessage('');
+
+    try {
+      const response = await fetch('/api/dev/reset-and-rescan', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setScanMessage(data?.error || data?.message || 'Unable to reset the local database.');
+      } else {
+        setScanMessage(data?.message || 'Database wiped and reingest started.');
+      }
+
+      const stateRes = await fetch('/api/scan');
+      const stateData = await stateRes.json().catch(() => null);
+      if (stateData) {
+        setScanState(stateData);
+        setIsScanning(stateData?.status === 'running');
+      } else {
+        setIsScanning(false);
+      }
+    } catch {
+      setScanMessage('Unable to reset the local database.');
+      setIsScanning(false);
+    } finally {
+      setIsResettingDevData(false);
+    }
+  };
 
   const updateDraftMultiSelect = (field: MultiSelectSearchField, values: string[]) => {
     setDraftSearchFilters((current) => ({
@@ -361,7 +415,11 @@ export default function DashboardLayout() {
               </span>
             ) : null}
           </button>
-          <button className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-[var(--surface-muted)]">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
+            title="Settings"
+          >
             <Settings size={20} />
           </button>
         </div>
@@ -588,6 +646,77 @@ export default function DashboardLayout() {
           </div>
         </div>
       </div>
+
+      {showSettings ? (
+        <div className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-950/30 backdrop-blur-sm px-6">
+          <div className="w-full max-w-xl rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] shadow-2xl shadow-slate-900/20 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-[color:var(--border)]">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-600">Settings</p>
+                <h2 className="text-xl font-black text-slate-900">Environment Controls</h2>
+              </div>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="p-2 rounded-xl border border-[color:var(--border)] text-slate-400 hover:text-slate-700"
+                title="Close settings"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-5 py-4 flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-black text-slate-900">Dev Mode</p>
+                  <p className="text-sm text-slate-500">
+                    Reveal destructive local-only tools for rebuilding the database during development.
+                  </p>
+                </div>
+                <button
+                    onClick={toggleDevMode}
+                  className={cn(
+                    'relative inline-flex h-8 w-14 items-center rounded-full transition-colors',
+                    devMode ? 'bg-violet-600' : 'bg-slate-300'
+                  )}
+                  aria-pressed={devMode}
+                  title={devMode ? 'Disable dev mode' : 'Enable dev mode'}
+                >
+                  <span
+                    className={cn(
+                      'inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform',
+                      devMode ? 'translate-x-8' : 'translate-x-1'
+                    )}
+                  />
+                </button>
+              </div>
+
+              {devMode ? (
+                <div className="rounded-[1.75rem] border border-red-200 bg-red-50 px-5 py-5 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 text-red-500">
+                      <TriangleAlert size={18} />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-black text-red-700">Danger Zone</p>
+                      <p className="text-sm text-red-600">
+                        Wipes the local SQLite database and reingests all PDFs from the configured paper storage path.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleResetAndReingest}
+                    disabled={isResettingDevData}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-black uppercase tracking-[0.16em] text-white shadow-lg shadow-red-600/20 transition-all hover:bg-red-700 disabled:opacity-60"
+                  >
+                    {isResettingDevData ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                    Wipe DB And Reingest
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <style jsx global>{`
         .glass {

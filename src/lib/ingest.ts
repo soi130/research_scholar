@@ -6,6 +6,7 @@ import { getDb, runInTransaction } from './db';
 import { extractMetadataFromPDF, getActiveExtractionEngine } from './ai';
 import { finishScan, tryStartScan, updateScanProgress } from './scan-state';
 import { normalizeTopicSentiment } from './topic-sentiment';
+import { normalizeResearchFacts } from './research-facts';
 
 type PdfTextToken = { T: string };
 type PdfTextLine = { R: PdfTextToken[] };
@@ -192,6 +193,10 @@ export async function ingestPaper(filepath: string) {
       (result as Record<string, unknown>).topic_labels,
       (result as Record<string, unknown>).topic_summary
     );
+    const normalizedResearchFacts = normalizeResearchFacts(
+      (result as Record<string, unknown>).research_facts,
+      { source_house: normalizedPublisher }
+    );
     const extractionEngine = getActiveExtractionEngine();
     const extractionPayload = {
       ...result,
@@ -202,6 +207,7 @@ export async function ingestPaper(filepath: string) {
       key_findings: normalizedKeyFindings,
       forecasts: normalizedForecasts,
       key_calls: normalizedKeyCalls,
+      research_facts: normalizedResearchFacts,
       topic_labels: normalizedTopicSentiment.labels,
       topic_summary: normalizedTopicSentiment.summary,
       filepath,
@@ -304,6 +310,47 @@ export async function ingestPaper(filepath: string) {
             keyCall.unit,
             keyCall.forecast_period,
             keyCall.source_text,
+          ]
+        );
+      }
+
+      for (const fact of normalizedResearchFacts) {
+        await database.run(
+          `
+            INSERT INTO research_facts (
+              paper_id,
+              source_house,
+              fact_type,
+              stance,
+              subject,
+              entity_or_scope,
+              metric,
+              value_number,
+              unit,
+              time_reference,
+              evidence_text,
+              evidence_page,
+              confidence,
+              ambiguity_flags,
+              review_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            paperId,
+            fact.source_house,
+            fact.fact_type,
+            fact.stance,
+            fact.subject,
+            fact.entity_or_scope,
+            fact.metric,
+            fact.value_number,
+            fact.unit,
+            fact.time_reference,
+            fact.evidence_text,
+            fact.evidence_page,
+            fact.confidence,
+            JSON.stringify(fact.ambiguity_flags),
+            fact.review_status,
           ]
         );
       }

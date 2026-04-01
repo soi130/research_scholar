@@ -106,6 +106,37 @@ export async function getDb(): Promise<Database> {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS research_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      paper_id INTEGER NOT NULL,
+      source_house TEXT NOT NULL DEFAULT '',
+      fact_type TEXT NOT NULL DEFAULT '',
+      stance TEXT NOT NULL DEFAULT '',
+      subject TEXT NOT NULL DEFAULT '',
+      entity_or_scope TEXT NOT NULL DEFAULT '',
+      metric TEXT NOT NULL DEFAULT '',
+      value_number REAL,
+      unit TEXT NOT NULL DEFAULT '',
+      time_reference TEXT NOT NULL DEFAULT '',
+      evidence_text TEXT NOT NULL DEFAULT '',
+      evidence_page INTEGER,
+      confidence REAL NOT NULL DEFAULT 0,
+      ambiguity_flags TEXT NOT NULL DEFAULT '[]',
+      review_status TEXT NOT NULL DEFAULT 'needs_review',
+      reviewed_fact_type TEXT,
+      reviewed_stance TEXT,
+      reviewed_subject TEXT,
+      reviewed_entity_or_scope TEXT,
+      reviewed_metric TEXT,
+      reviewed_value_number REAL,
+      reviewed_unit TEXT,
+      reviewed_time_reference TEXT,
+      reviewed_by TEXT,
+      reviewed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
     CREATE INDEX IF NOT EXISTS idx_papers_status_created_at ON papers(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_papers_hash ON papers(hash);
     CREATE INDEX IF NOT EXISTS idx_papers_published_date ON papers(published_date);
@@ -120,6 +151,10 @@ export async function getDb(): Promise<Database> {
     CREATE INDEX IF NOT EXISTS idx_paper_extractions_file_hash ON paper_extractions(file_hash);
     CREATE INDEX IF NOT EXISTS idx_paper_topic_labels_paper_id ON paper_topic_labels(paper_id);
     CREATE INDEX IF NOT EXISTS idx_paper_topic_labels_topic_code ON paper_topic_labels(topic_code);
+    CREATE INDEX IF NOT EXISTS idx_research_facts_paper_id ON research_facts(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_research_facts_fact_type ON research_facts(fact_type);
+    CREATE INDEX IF NOT EXISTS idx_research_facts_review_status ON research_facts(review_status);
+    CREATE INDEX IF NOT EXISTS idx_research_facts_source_house ON research_facts(source_house);
   `);
 
   try {
@@ -139,6 +174,39 @@ export async function getDb(): Promise<Database> {
   } catch {}
   try {
     await db.exec(`ALTER TABLE papers ADD COLUMN topic_summary TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_fact_type TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_stance TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_subject TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_entity_or_scope TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_metric TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_value_number REAL`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_unit TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_time_reference TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_by TEXT`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_at DATETIME`);
+  } catch {}
+  try {
+    await db.exec(`ALTER TABLE research_facts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
   } catch {}
 
   // Full-text search index for scalable paper search and retrieval.
@@ -214,4 +282,28 @@ export async function runInTransaction<T>(operation: (database: Database) => Pro
       throw error;
     }
   });
+}
+
+export async function resetDatabaseFile() {
+  const dbPath = path.join(process.cwd(), 'papers.db');
+
+  if (db) {
+    try {
+      await db.close();
+    } catch {}
+    db = null;
+  }
+
+  for (const suffix of ['', '-shm', '-wal']) {
+    const target = `${dbPath}${suffix}`;
+    try {
+      if (fs.existsSync(target)) {
+        fs.unlinkSync(target);
+      }
+    } catch (error) {
+      console.warn(`Failed to remove database file ${target}:`, error);
+    }
+  }
+
+  writeQueue = Promise.resolve();
 }

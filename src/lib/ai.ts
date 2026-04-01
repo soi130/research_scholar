@@ -6,7 +6,7 @@ const openAIKey = process.env.OPENAI_API_KEY;
 
 const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
 const openai = openAIKey ? new OpenAI({ apiKey: openAIKey }) : null;
-export const EXTRACTION_PROMPT_VERSION = '2026-03-31-v3';
+export const EXTRACTION_PROMPT_VERSION = '2026-04-01-v1-research-facts';
 
 export function getActiveExtractionEngine() {
   if (openai) {
@@ -198,6 +198,25 @@ Analyze the text below and return a single JSON object (no markdown):
   - "unit": optional unit such as %, bps, USD, x, etc
   - "forecast_period": optional period such as 2026, Q4 2025, 12M target, etc
   - "source_text": short verbatim supporting snippet or table cell text
+- "research_facts": Array of normalized atomic investment-research facts. Focus on explicit, comparable facts only.
+  Prioritize these fact types first: "macro_actual", "macro_forecast", "forecast_revision", "policy_expectation", "target_price", "rating_change".
+  You may also use: "earnings_estimate", "thesis", "catalyst", "risk", "market_implication".
+  Each item must be an object with:
+  - "source_house": publisher/house making the call. Use paper publisher if it is the same house.
+  - "fact_type": one of ["macro_actual","macro_forecast","forecast_revision","policy_expectation","earnings_estimate","target_price","rating_change","thesis","catalyst","risk","market_implication"]
+  - "stance": one of ["actual","forecast","revision","recommendation","scenario","opinion"]
+  - "subject": what is being measured or claimed
+  - "entity_or_scope": country, company, central bank, sector, asset group, or scope
+  - "metric": how it is measured, e.g. "YoY", "policy rate change", "target price", "annual growth"
+  - "value_number": numeric value if explicit, otherwise null
+  - "unit": unit such as "%", "bps", "THB", "USD", "rating", or a short textual unit
+  - "time_reference": period or horizon such as "March 2026", "Q3 2026", "FY2027", "current"
+  - "evidence_text": short supporting snippet
+  - "evidence_page": page number if visible/inferable from the extracted text layout, otherwise null
+  - "confidence": decimal between 0 and 1
+  - "ambiguity_flags": array using only:
+    ["missing_subject","missing_entity_or_scope","missing_metric","missing_value","missing_unit","missing_time_reference","missing_evidence_text","mixed_actual_and_forecast","unclear_number_metric_mapping","multiple_numbers_in_sentence","multiple_entities_in_context","weak_stance_signal","table_parse_uncertain","ocr_noise","unsupported_inference"]
+  - "review_status": one of ["accepted","needs_review","rejected"]
 - "topic_labels": Array of topic sentiment labels using ONLY these topics:
   ["GDP_GROWTH","INFLATION","RATES","EQUITY","CREDIT","OIL","GOLD","FX_USDTHB","FX_USD_BROAD","FX_ASIA","FX_EM"]
   Each item must be an object with:
@@ -224,6 +243,12 @@ Rules:
 - Do not return only the series label as the title unless that is truly the only title shown.
 - Only include "key_calls" rows for explicit numbers, targets, rates, table values, or clearly comparable house calls.
 - If there are no such rows, return an empty array.
+- For "research_facts":
+  - Each fact must be atomic and citeable.
+  - Never output a naked number without subject, entity_or_scope, metric, and time_reference.
+  - If a sentence mixes actual and forecast values, split them into separate facts or flag "mixed_actual_and_forecast".
+  - Use "needs_review" when critical context is missing or ambiguous.
+  - If the evidence is too weak or noisy to trust, either flag it heavily or omit it.
 - For topic sentiment:
   - relevance 0 means not related
   - if relevance is 0, direction must be 0
