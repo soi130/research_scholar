@@ -1,11 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getDb, runInTransaction } from '@/lib/db';
+import { syncPaperKeyCalls } from '@/lib/key-calls';
+import { normalizeTopicSentiment } from '@/lib/topic-sentiment';
 
 type Params = { params: Promise<{ id: string }> };
 
 function paperResponse(paper: Record<string, unknown>) {
+  const latestExtractionProvider = String(paper.latest_extraction_provider || '').trim().toLowerCase();
+  const latestExtractionPromptVersion = String(paper.latest_extraction_prompt_version || '').trim().toLowerCase();
+
   return {
     ...paper,
+    generated_locally:
+      latestExtractionProvider === 'local'
+      || latestExtractionPromptVersion.includes('local-fallback'),
     authors: paper.authors ? JSON.parse(String(paper.authors)) : [],
     key_findings: paper.key_findings ? JSON.parse(String(paper.key_findings)) : [],
     tags: paper.tags ? JSON.parse(String(paper.tags)) : [],
@@ -49,6 +57,8 @@ export async function POST(request: Request, { params }: Params) {
       ['approved', id]
     );
 
+    await syncPaperKeyCalls(db, Number(id));
+
     const updated = await db.get<Record<string, unknown>>('SELECT * FROM papers WHERE id = ?', [id]);
     return { type: 'updated' as const, paper: updated! };
   });
@@ -82,8 +92,14 @@ export async function PATCH(request: Request, { params }: Params) {
     key_findings,
     forecasts,
     tags,
+    topic_labels,
+    topic_summary,
     expectedUpdatedAt,
   } = body;
+
+  const normalizedTopicSentiment = normalizeTopicSentiment(topic_labels, topic_summary, {
+    preserveManualDirection: true,
+  });
 
   const result = await runInTransaction(async (db) => {
     const current = await db.get<Record<string, unknown>>('SELECT * FROM papers WHERE id = ?', [id]);
@@ -100,7 +116,7 @@ export async function PATCH(request: Request, { params }: Params) {
       SET 
         title = ?, authors = ?, published_date = ?,
         publisher = ?, series_name = ?, journal = ?,
-      abstract = ?, key_findings = ?, forecasts = ?, tags = ?,
+      abstract = ?, key_findings = ?, forecasts = ?, topic_labels = ?, topic_summary = ?, tags = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
@@ -113,9 +129,38 @@ export async function PATCH(request: Request, { params }: Params) {
       abstract,
       JSON.stringify(normalizeKeyFindings(key_findings)),
       JSON.stringify(forecasts || {}),
+      JSON.stringify(normalizedTopicSentiment.labels),
+      JSON.stringify(normalizedTopicSentiment.summary),
       JSON.stringify(tags || []),
       id
     ]);
+
+    await db.run(`DELETE FROM paper_topic_labels WHERE paper_id = ?`, [id]);
+
+    for (const topicLabel of normalizedTopicSentiment.labels) {
+      await db.run(
+        `
+          INSERT INTO paper_topic_labels (
+            paper_id, topic_code, relevance, direction, confidence, evidence, regime, drivers, display_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          id,
+          topicLabel.topic,
+          topicLabel.relevance,
+          topicLabel.direction,
+          topicLabel.confidence,
+          topicLabel.evidence,
+          topicLabel.regime || null,
+          JSON.stringify(topicLabel.drivers || []),
+          JSON.stringify(topicLabel.display || {}),
+        ]
+      );
+    }
+
+    if (String(current.status || '') === 'approved') {
+      await syncPaperKeyCalls(db, Number(id));
+    }
 
     const updated = await db.get<Record<string, unknown>>('SELECT * FROM papers WHERE id = ?', [id]);
     return { type: 'updated' as const, paper: updated! };
@@ -138,7 +183,15 @@ export async function PATCH(request: Request, { params }: Params) {
 export async function GET(request: Request, { params }: Params) {
   const { id } = await params;
   const db = await getDb();
-  const paper = await db.get<Record<string, unknown>>('SELECT * FROM papers WHERE id = ?', [id]);
+  const paper = await db.get<Record<string, unknown>>(
+    `
+      SELECT p.*, e.provider AS latest_extraction_provider, e.prompt_version AS latest_extraction_prompt_version
+      FROM papers p
+      LEFT JOIN paper_extractions e ON e.id = p.latest_extraction_id
+      WHERE p.id = ?
+    `,
+    [id]
+  );
   if (!paper) {
     return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
   }

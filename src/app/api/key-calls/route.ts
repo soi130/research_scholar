@@ -37,6 +37,7 @@ export async function GET(request: Request) {
         k.filepath,
         k.publish_date,
         k.indicator,
+        k.indicator_code,
         k.house,
         k.value,
         k.unit,

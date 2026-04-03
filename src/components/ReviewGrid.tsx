@@ -5,6 +5,8 @@ import { Check, Edit3, Save, X, Loader2, Sparkles, Plus, Tag as TagIcon, Buildin
 import { MULTI_SELECT_SEARCH_FIELDS, type AdvancedSearchFilters } from '@/lib/search';
 import type { TopicLabel, TopicSummary } from '@/lib/topic-sentiment';
 import TopicSentimentPanel from './TopicSentimentPanel';
+import { TOPIC_LABELS } from '@/lib/topic-taxonomy';
+import { getForecastIndicatorOptions } from '@/lib/forecast-indicators';
 
 interface Paper {
   id: number;
@@ -24,6 +26,12 @@ interface Paper {
   updated_at: string;
 }
 
+type ForecastEditEntry = {
+  value: string;
+  unit: string;
+  forecast_period: string;
+};
+
 type ScanState = {
   status: 'idle' | 'running' | 'completed' | 'failed';
   message: string | null;
@@ -39,6 +47,89 @@ const renderValue = (v: unknown): string => {
   }
   return String(v);
 };
+
+function getForecastEditEntry(rawValue: unknown): ForecastEditEntry {
+  if (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)) {
+    const record = rawValue as Record<string, unknown>;
+    return {
+      value: String(record.value ?? '').trim(),
+      unit: String(record.unit ?? '').trim(),
+      forecast_period: String(record.forecast_period ?? '').trim(),
+    };
+  }
+
+  return {
+    value: String(rawValue ?? '').trim(),
+    unit: '',
+    forecast_period: '',
+  };
+}
+
+const FORECAST_FIELDS = getForecastIndicatorOptions().map((indicator) => indicator.label);
+
+function TopicSlider({
+  label,
+  min,
+  max,
+  value,
+  valueLabel,
+  accentClassName = 'accent-violet-600',
+  valueClassName = 'text-slate-700',
+  centeredPreview = false,
+  previewFillClassName = 'bg-violet-500',
+  onChange,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+  valueLabel: string;
+  accentClassName?: string;
+  valueClassName?: string;
+  centeredPreview?: boolean;
+  previewFillClassName?: string;
+  onChange: (value: number) => void;
+}) {
+  const clampedValue = Math.max(min, Math.min(max, value));
+  const previewWidthPercent = max === 0 ? 0 : (Math.abs(clampedValue) / max) * 50;
+
+  return (
+    <label className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
+        <span className={`text-[10px] font-black ${valueClassName}`}>{valueLabel}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={`w-full h-3 ${accentClassName}`}
+      />
+      {centeredPreview ? (
+        <div className="relative h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-400/70" />
+          {clampedValue !== 0 ? (
+            <div
+              className={`absolute inset-y-0 rounded-full ${previewFillClassName}`}
+              style={
+                clampedValue < 0
+                  ? { right: '50%', width: `${previewWidthPercent}%` }
+                  : { left: '50%', width: `${previewWidthPercent}%` }
+              }
+            />
+          ) : null}
+        </div>
+      ) : null}
+      <div className="flex items-center justify-between text-[9px] font-bold text-slate-400">
+        <span>{min > 0 ? `+${min}` : min}</span>
+        <span>{max > 0 ? `+${max}` : max}</span>
+      </div>
+    </label>
+  );
+}
 
 import PdfThumbnail from './PdfThumbnail';
 
@@ -61,7 +152,7 @@ export default function ReviewGrid({
   scanState = null,
   scanMessage = '',
 }: {
-  onOpenViewer?: (id: number) => void;
+  onOpenViewer?: (id: number, cacheKey?: string) => void;
   searchQuery?: string;
   searchFilters: AdvancedSearchFilters;
   onSyncAssets?: () => void;
@@ -164,6 +255,34 @@ export default function ReviewGrid({
     setActionMessage('Paper saved.');
     setEditingId(null);
     void fetchPending({ nextOffset: 0, append: false, query: searchQuery });
+  };
+
+  const updateForecastValue = (label: string, field: keyof ForecastEditEntry, value: string) => {
+    const currentForecasts = { ...(editValues.forecasts || {}) } as Record<string, unknown>;
+    const currentEntry = getForecastEditEntry(currentForecasts[label]);
+    const nextEntry = {
+      ...currentEntry,
+      [field]: value.trim(),
+    };
+
+    if (nextEntry.value) currentForecasts[label] = nextEntry;
+    else delete currentForecasts[label];
+
+    setEditValues({
+      ...editValues,
+      forecasts: currentForecasts,
+    });
+  };
+
+  const updateTopicLabel = (topic: string, patch: Partial<TopicLabel>) => {
+    const currentLabels = editValues.topic_labels || [];
+    const nextLabels = currentLabels.map((label) =>
+      label.topic === topic ? { ...label, ...patch } : label
+    );
+    setEditValues({
+      ...editValues,
+      topic_labels: nextLabels,
+    });
   };
 
   const handleAddMasterTag = async () => {
@@ -303,10 +422,10 @@ export default function ReviewGrid({
             <div className="flex gap-8 items-start">
               <div className="w-72 flex-shrink-0">
                 {/* 1st Page Preview (List Mode) */}
-                <div className="relative w-full aspect-[3/4] bg-[var(--surface-soft)] rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all cursor-pointer shadow-inner" onClick={() => onOpenViewer?.(paper.id)}>
-                   <PdfThumbnail paperId={paper.id} className="w-full h-full" />
+                <div className="relative w-full aspect-[3/4] bg-[var(--surface-soft)] rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all cursor-pointer shadow-inner" onClick={() => onOpenViewer?.(paper.id, paper.updated_at)}>
+                   <PdfThumbnail paperId={paper.id} cacheKey={paper.updated_at} className="w-full h-full" />
                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-4">
-                      <div className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-lg text-slate-900 text-[10px] font-black shadow-xl">
+                      <div className="bg-[#ffffff] text-black backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-black shadow-xl">
                         EXPAND
                       </div>
                    </div>
@@ -453,78 +572,179 @@ export default function ReviewGrid({
                   </div>
                </div>
 
-               <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.95fr] gap-4">
-                  <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
-                    <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">Summary</p>
-                    {editingId === paper.id ? (
-                      <textarea
-                        className="w-full min-h-28 bg-[var(--surface-strong)] border border-violet-500/30 rounded-xl p-3 text-sm text-slate-900 outline-none"
-                        value={editValues.abstract || ''}
-                        onChange={(e) => setEditValues({ ...editValues, abstract: e.target.value })}
-                      />
-                    ) : (
-                      <p className="text-sm leading-6 text-slate-700">
-                        {paper.abstract || 'No summary extracted yet.'}
-                      </p>
-                    )}
-                  </div>
-
+               <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.9fr] gap-4">
                   <div className="space-y-4">
                     <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                      <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">Summary</p>
+                      {editingId === paper.id ? (
+                        <textarea
+                          className="w-full min-h-28 bg-[var(--surface-strong)] border border-violet-500/30 rounded-xl p-3 text-sm text-slate-900 outline-none"
+                          value={editValues.abstract || ''}
+                          onChange={(e) => setEditValues({ ...editValues, abstract: e.target.value })}
+                        />
+                      ) : (
+                        <p className="text-sm leading-6 text-slate-700">
+                          {paper.abstract || 'No summary extracted yet.'}
+                        </p>
+                      )}
+                    </div>
+
+                  <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
                     <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">3 KTAs</p>
                     {editingId === paper.id ? (
                       <div className="space-y-2">
                         {Array.from({ length: 3 }).map((_, index) => (
-                          <textarea
-                            key={index}
-                            className="w-full min-h-16 bg-[var(--surface-strong)] border border-violet-500/30 rounded-xl p-3 text-sm text-slate-900 outline-none"
-                            value={(editValues.key_findings || ['', '', ''])[index] || ''}
-                            onChange={(e) => {
-                              const next = [...(editValues.key_findings || ['', '', ''])];
-                              next[index] = e.target.value;
-                              setEditValues({ ...editValues, key_findings: next.slice(0, 3) });
-                            }}
-                          />
-                        ))}
-                      </div>
-                    ) : paper.key_findings.length > 0 ? (
-                      <ol className="space-y-2">
-                        {paper.key_findings.slice(0, 3).map((finding, index) => (
-                          <li key={`${paper.id}-${index}`} className="flex gap-3 text-sm text-slate-700">
-                            <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-black flex items-center justify-center flex-shrink-0">
-                              {index + 1}
-                            </span>
-                            <span className="leading-6">{finding}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="text-sm text-slate-400">No key takeaways extracted yet.</p>
-                    )}
+                            <textarea
+                              key={index}
+                              className="w-full min-h-16 bg-[var(--surface-strong)] border border-violet-500/30 rounded-xl p-3 text-sm text-slate-900 outline-none"
+                              value={(editValues.key_findings || ['', '', ''])[index] || ''}
+                              onChange={(e) => {
+                                const next = [...(editValues.key_findings || ['', '', ''])];
+                                next[index] = e.target.value;
+                                setEditValues({ ...editValues, key_findings: next.slice(0, 3) });
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ) : paper.key_findings.length > 0 ? (
+                        <ol className="space-y-2">
+                          {paper.key_findings.slice(0, 3).map((finding, index) => (
+                            <li key={`${paper.id}-${index}`} className="flex gap-3 text-sm text-slate-700">
+                              <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-black flex items-center justify-center flex-shrink-0">
+                                {index + 1}
+                              </span>
+                              <span className="leading-6">{finding}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="text-sm text-slate-400">No key takeaways extracted yet.</p>
+                      )}
                     </div>
 
                     <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
                       <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600 mb-2">Forecast Numbers</p>
-                      <div className="grid grid-cols-2 gap-4">
-                        {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
-                          <div key={k} className="space-y-0.5 min-w-0">
-                            <span className="text-[10px] text-slate-500 font-black uppercase tracking-tight truncate block">{k}</span>
-                            <span className="text-[11px] text-slate-900 font-bold truncate block">{renderValue(v)}</span>
-                          </div>
-                        ))}
-                        {Object.keys(paper.forecasts || {}).length === 0 && <p className="text-[9px] text-slate-300 italic col-span-2">No specific forecasts extracted.</p>}
-                      </div>
+                      {editingId === paper.id ? (
+                        <div className="grid grid-cols-1 gap-3">
+                          {FORECAST_FIELDS.map((label) => {
+                            const entry = getForecastEditEntry(editValues.forecasts?.[label]);
+                            return (
+                              <div key={label} className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-strong)] p-3 space-y-2">
+                                <span className="text-[10px] text-slate-500 font-black uppercase tracking-tight block">{label}</span>
+                                <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_120px_140px] gap-2">
+                                  <input
+                                    className="w-full bg-[var(--surface-soft)] border border-violet-500/30 rounded-xl px-3 py-2 text-sm text-slate-900 outline-none"
+                                    value={entry.value}
+                                    onChange={(e) => updateForecastValue(label, 'value', e.target.value)}
+                                    placeholder="Forecast value"
+                                  />
+                                  <input
+                                    className="w-full bg-[var(--surface-soft)] border border-violet-500/30 rounded-xl px-3 py-2 text-sm text-slate-900 outline-none"
+                                    value={entry.unit}
+                                    onChange={(e) => updateForecastValue(label, 'unit', e.target.value)}
+                                    placeholder="Unit"
+                                  />
+                                  <input
+                                    className="w-full bg-[var(--surface-soft)] border border-violet-500/30 rounded-xl px-3 py-2 text-sm text-slate-900 outline-none"
+                                    value={entry.forecast_period}
+                                    onChange={(e) => updateForecastValue(label, 'forecast_period', e.target.value)}
+                                    placeholder="Period"
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                          {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
+                            <div key={k} className="space-y-0.5 min-w-0">
+                              <span className="text-[10px] text-slate-500 font-black uppercase tracking-tight truncate block">{k}</span>
+                              <span className="text-[11px] text-slate-900 font-bold truncate block">{renderValue(v)}</span>
+                            </div>
+                          ))}
+                          {Object.keys(paper.forecasts || {}).length === 0 && <p className="text-[9px] text-slate-300 italic col-span-2">No specific forecasts extracted.</p>}
+                        </div>
+                      )}
                     </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {editingId === paper.id ? (
+                      <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-3">
+                        <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">Topic Sentiment</p>
+                        {(editValues.topic_labels || []).length > 0 ? (
+                          <div className="grid grid-cols-1 gap-3">
+                            {(editValues.topic_labels || []).map((label) => (
+                              <div key={label.topic} className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-strong)] p-3 space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="text-xs font-black text-slate-900">{TOPIC_LABELS[label.topic]}</span>
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.14em]">{label.topic}</span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  <TopicSlider
+                                    label="Relevance"
+                                    min={0}
+                                    max={3}
+                                    value={label.relevance}
+                                    valueLabel={`${label.relevance}/3`}
+                                    onChange={(value) => updateTopicLabel(label.topic, { relevance: value })}
+                                  />
+                                  <TopicSlider
+                                    label="Direction"
+                                    min={-2}
+                                    max={2}
+                                    value={label.direction}
+                                    valueLabel={label.direction > 0 ? `+${label.direction}` : String(label.direction)}
+                                    accentClassName="accent-slate-500"
+                                    valueClassName={
+                                      label.direction < 0
+                                        ? 'text-red-600'
+                                        : label.direction > 0
+                                          ? 'text-emerald-600'
+                                          : 'text-amber-600'
+                                    }
+                                    centeredPreview
+                                    previewFillClassName={
+                                      label.direction < 0
+                                        ? 'bg-red-500'
+                                        : label.direction > 0
+                                          ? 'bg-emerald-500'
+                                          : 'bg-amber-400'
+                                    }
+                                    onChange={(value) => updateTopicLabel(label.topic, { direction: value })}
+                                  />
+                                  <TopicSlider
+                                    label="Confidence"
+                                    min={0}
+                                    max={3}
+                                    value={label.confidence}
+                                    valueLabel={`${label.confidence}/3`}
+                                    onChange={(value) => updateTopicLabel(label.topic, { confidence: value })}
+                                  />
+                                </div>
+                                <label className="block space-y-1">
+                                  <span className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Evidence</span>
+                                  <textarea
+                                    className="w-full min-h-20 rounded-xl border border-violet-500/30 bg-[var(--surface-soft)] p-3 text-xs leading-5 text-slate-900 outline-none"
+                                    value={label.evidence}
+                                    onChange={(e) => updateTopicLabel(label.topic, { evidence: e.target.value })}
+                                  />
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400">No structured topic sentiment extracted yet.</p>
+                        )}
+                      </div>
+                    ) : (paper.topic_labels || []).some((label) => label.relevance > 0) ? (
+                      <TopicSentimentPanel topicLabels={paper.topic_labels || []} topicSummary={paper.topic_summary} />
+                    ) : null}
                   </div>
                </div>
               </div>
             </div>
-
-            {(paper.topic_labels || []).some((label) => label.relevance > 0) ? (
-              <div className="w-full">
-                <TopicSentimentPanel topicLabels={paper.topic_labels || []} topicSummary={paper.topic_summary} />
-              </div>
-            ) : null}
           </div>
         ))}
       </div>

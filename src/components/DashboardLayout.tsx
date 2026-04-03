@@ -18,11 +18,13 @@ import {
   X,
   TriangleAlert,
   Loader2,
+  Edit3,
 } from 'lucide-react';
 import ReviewGrid from './ReviewGrid';
 import LibraryView from './LibraryView';
 import ChatPanel from './ChatPanel';
 import GraphView from './GraphView';
+import KeyCallTable from './KeyCallTable';
 import MultiSelectDropdown from './MultiSelectDropdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -60,7 +62,7 @@ function getPreferredTheme(): 'light' | 'dark' {
 }
 
 export default function DashboardLayout() {
-  type View = 'library' | 'review' | 'chat' | 'graph';
+  type View = 'library' | 'review' | 'chat' | 'graph' | 'keyCalls';
   type Theme = 'light' | 'dark';
   type ScanState = {
     status: 'idle' | 'running' | 'completed' | 'failed';
@@ -307,8 +309,10 @@ export default function DashboardLayout() {
     window.location.href = '/login';
   };
 
-  const openPdfInNewWindow = (id: number) => {
-    const pdfUrl = `/api/papers/${id}/serve`;
+  const openPdfInNewWindow = (id: number, cacheKey?: string) => {
+    const pdfUrl = cacheKey
+      ? `/api/papers/${id}/serve?v=${encodeURIComponent(cacheKey)}`
+      : `/api/papers/${id}/serve`;
     const width = Math.max(960, Math.min(window.screen.availWidth - 80, 1320));
     const height = Math.max(700, Math.min(window.screen.availHeight - 80, 980));
     const left = Math.max(20, Math.round((window.screen.availWidth - width) / 2));
@@ -334,6 +338,7 @@ export default function DashboardLayout() {
   const navItems = [
     { id: 'library', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'review', label: 'Review Queue', icon: RefreshCw },
+    { id: 'keyCalls', label: 'Key Calls', icon: Edit3 },
     { id: 'graph', label: 'Knowledge Graph', icon: Share2 },
     { id: 'chat', label: 'AI Multi-Chat', icon: MessageSquareShare },
   ] as const satisfies ReadonlyArray<{ id: View; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }>;
@@ -585,6 +590,8 @@ export default function DashboardLayout() {
                 ? 'Awaiting Human Review'
                 : view === 'library'
                   ? 'Research Dashboard'
+                  : view === 'keyCalls'
+                    ? 'Key Call Table'
                   : view === 'graph'
                     ? 'Knowledge Graph'
                     : 'Research Multi-Chat'}
@@ -595,6 +602,8 @@ export default function DashboardLayout() {
                 ? 'Verify and approve AI-generated research metadata.'
                 : view === 'library'
                   ? 'Explore your institutional research collection.'
+                  : view === 'keyCalls'
+                    ? 'Compare, override, and curate extracted house calls with manual precedence.'
                   : view === 'graph'
                     ? 'Trace relationships between papers, authors, tags, publishers, and shared themes.'
                     : 'Synthesize insights across your selected papers.'}
@@ -633,6 +642,10 @@ export default function DashboardLayout() {
                 onOpenViewer={openPdfInNewWindow}
                 searchQuery={searchQuery}
               />
+            ) : null}
+
+            {view === 'keyCalls' ? (
+              <KeyCallTable />
             ) : null}
 
             {view === 'chat' ? (

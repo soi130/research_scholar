@@ -3,22 +3,50 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, FileText } from 'lucide-react';
 
+type PdfRenderingTask = {
+  promise: Promise<unknown>;
+  cancel: () => void;
+};
+
+type PdfDocumentProxy = {
+  getPage: (pageNumber: number) => Promise<{
+    getViewport: (options: { scale: number }) => { width: number; height: number };
+    render: (options: {
+      canvasContext: CanvasRenderingContext2D;
+      viewport: { width: number; height: number };
+      canvas: HTMLCanvasElement;
+    }) => PdfRenderingTask;
+  }>;
+  destroy: () => void;
+};
+
+type PdfLoadingTask = {
+  promise: Promise<PdfDocumentProxy>;
+  destroy: () => void;
+};
+
+type PdfjsModule = {
+  GlobalWorkerOptions: { workerSrc: string };
+  version: string;
+  getDocument: (src: string) => PdfLoadingTask;
+};
+
 interface PdfThumbnailProps {
   paperId: number;
+  cacheKey?: string;
   className?: string;
 }
 
-export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) {
+export default function PdfThumbnail({ paperId, cacheKey, className }: PdfThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
-    let loadingTask: any = null;
-    let pdfDoc: any = null;
-    let renderTask: any = null;
-    let timeoutId: NodeJS.Timeout;
+    let loadingTask: PdfLoadingTask | null = null;
+    let pdfDoc: PdfDocumentProxy | null = null;
+    let renderTask: PdfRenderingTask | null = null;
 
     const renderThumbnail = async () => {
       try {
@@ -26,12 +54,15 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
         setError(false);
 
         // Dynamically import pdfjs-dist on the client
-        const pdfjsLib = await import('pdfjs-dist');
+        const pdfjsLib = (await import('pdfjs-dist')) as unknown as PdfjsModule;
         
         // Set worker path
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-        loadingTask = pdfjsLib.getDocument(`/api/papers/${paperId}/serve`);
+        const pdfUrl = cacheKey
+          ? `/api/papers/${paperId}/serve?v=${encodeURIComponent(cacheKey)}`
+          : `/api/papers/${paperId}/serve`;
+        loadingTask = pdfjsLib.getDocument(pdfUrl);
         pdfDoc = await loadingTask.promise;
         const page = await pdfDoc.getPage(1);
 
@@ -55,8 +86,8 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
         renderTask = page.render(renderContext);
         await renderTask.promise;
         if (isMounted) setLoading(false);
-      } catch (err: any) {
-        if (err?.name === 'RenderingCancelledException') return;
+      } catch (err: unknown) {
+        if (typeof err === 'object' && err !== null && 'name' in err && (err as { name?: string }).name === 'RenderingCancelledException') return;
         console.error('Thumbnail error:', err);
         if (isMounted) {
           setError(true);
@@ -66,7 +97,7 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
     };
 
     // Add a debounce to prevent rapid firing during search filtering
-    timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       if (isMounted) renderThumbnail();
     }, 300);
 
@@ -74,16 +105,16 @@ export default function PdfThumbnail({ paperId, className }: PdfThumbnailProps) 
       isMounted = false;
       clearTimeout(timeoutId);
       if (renderTask) {
-        try { renderTask.cancel(); } catch(e) {}
+        try { renderTask.cancel(); } catch {}
       }
       if (loadingTask && typeof loadingTask.destroy === 'function') {
-        try { loadingTask.destroy(); } catch(e) {}
+        try { loadingTask.destroy(); } catch {}
       }
       if (pdfDoc && typeof pdfDoc.destroy === 'function') {
-        try { pdfDoc.destroy(); } catch(e) {}
+        try { pdfDoc.destroy(); } catch {}
       }
     };
-  }, [paperId]);
+  }, [paperId, cacheKey]);
 
   return (
     <div className={`relative bg-slate-50 flex items-center justify-center overflow-hidden ${className}`}>

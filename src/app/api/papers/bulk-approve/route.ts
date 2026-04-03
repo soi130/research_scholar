@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runInTransaction } from '@/lib/db';
+import { syncPaperKeyCalls } from '@/lib/key-calls';
 
 type ApprovalItem = {
   id: number;
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
          WHERE id = ?`,
         [id]
       );
+      await syncPaperKeyCalls(db, id);
       approvedIds.push(id);
     }
 

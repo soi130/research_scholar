@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 type Params = { params: Promise<{ id: string }> };
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request, { params }: Params) {
   const { id } = await params;
@@ -20,7 +21,9 @@ export async function GET(request: Request, { params }: Params) {
     headers: {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${path.basename(paper.filepath)}"`,
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
     }
   });
 }

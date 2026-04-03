@@ -42,6 +42,40 @@ function MetricBar({
   );
 }
 
+function DirectionMetricBar({
+  value,
+  valueLabel,
+}: {
+  value: number;
+  valueLabel: string;
+}) {
+  const clampedValue = Math.max(-2, Math.min(2, value));
+  const widthPercent = (Math.abs(clampedValue) / 2) * 50;
+  const fillClassName = clampedValue < 0 ? getDirectionFillClass(clampedValue) : getDirectionFillClass(clampedValue || 1);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Direction</span>
+        <span className="text-[10px] font-bold text-slate-700">{valueLabel}</span>
+      </div>
+      <div className="relative h-2.5 overflow-hidden rounded-full bg-gradient-to-r from-red-100 via-amber-100 to-emerald-100 dark:from-red-950/45 dark:via-amber-900/35 dark:to-emerald-950/45">
+        <div className="absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 bg-slate-500/70" />
+        {clampedValue !== 0 ? (
+          <div
+            className={`absolute inset-y-0 rounded-full ${fillClassName}`}
+            style={
+              clampedValue < 0
+                ? { right: '50%', width: `${widthPercent}%` }
+                : { left: '50%', width: `${widthPercent}%` }
+            }
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function getDirectionFillClass(direction: number) {
   if (direction <= -2) return 'bg-red-500';
   if (direction === -1) return 'bg-red-400';
@@ -50,11 +84,19 @@ function getDirectionFillClass(direction: number) {
   return 'bg-emerald-500';
 }
 
+function getDirectionTextClass(direction: number) {
+  if (direction < 0) return 'text-red-600';
+  if (direction > 0) return 'text-emerald-600';
+  return 'text-amber-600';
+}
+
 export default function TopicSentimentPanel({
   topicLabels,
+  rail = false,
 }: {
   topicLabels: TopicLabel[];
   topicSummary: TopicSummary;
+  rail?: boolean;
 }) {
   const visibleLabels = topicLabels
     .filter((label) => label.relevance >= 2 && label.confidence >= 2)
@@ -72,12 +114,15 @@ export default function TopicSentimentPanel({
   return (
     <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-soft)] p-4 space-y-3">
       <p className="text-sm font-black uppercase tracking-[0.16em] text-violet-600">Topic Sentiment</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div
+        className={rail ? 'grid grid-cols-1 gap-3' : 'grid gap-3'}
+        style={rail ? undefined : { gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+      >
         {visibleLabels.map((label) => (
           <div key={label.topic} className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-strong)] px-3 py-2 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-black text-slate-900">{TOPIC_LABELS[label.topic]}</span>
-              <span className="text-[10px] font-bold text-violet-700">
+              <span className={`text-[10px] font-bold ${getDirectionTextClass(label.direction)}`}>
                 {formatTopicDirection(label)}
               </span>
             </div>
@@ -88,14 +133,9 @@ export default function TopicSentimentPanel({
                 percent={(label.relevance / 3) * 100}
                 fillClassName="bg-violet-500"
               />
-              <MetricBar
-                label="Direction"
+              <DirectionMetricBar
+                value={label.direction}
                 valueLabel={label.direction > 0 ? `+${label.direction}` : String(label.direction)}
-                percent={((label.direction + 2) / 4) * 100}
-                fillClassName={getDirectionFillClass(label.direction)}
-                trackClassName="bg-gradient-to-r from-red-950/45 via-amber-900/35 to-emerald-950/45 md:from-red-100 md:via-amber-100 md:to-emerald-100 dark:from-red-950/45 dark:via-amber-900/35 dark:to-emerald-950/45"
-                markerPercent={50}
-                markerClassName="bg-slate-500/70"
               />
               <MetricBar
                 label="Confidence"

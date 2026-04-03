@@ -35,6 +35,9 @@ export type DailyTopicAggregate = {
 };
 
 type RawTopicLabel = Record<string, unknown>;
+type NormalizeTopicLabelOptions = {
+  preserveManualDirection?: boolean;
+};
 
 function clampInteger(value: unknown, min: number, max: number) {
   const numeric = Number(value);
@@ -129,6 +132,76 @@ function inferUsdThbDirectionFromEvidence(evidence: string) {
   return null;
 }
 
+function inferTopicDirectionFromEvidence(topic: TopicCode, evidence: string) {
+  const normalized = evidence.toLowerCase();
+  if (!normalized) return null;
+
+  if (topic === 'RATES') {
+    const negativeSignals = [
+      'limited policy space',
+      'budget delay',
+      'budget delays',
+      'could impact rates',
+      'flattening pressure',
+      'lower yields',
+      'yields lower',
+      'rates lower',
+      'rate cuts',
+      'cut rates',
+      'dovish',
+      'easing',
+      'less upside in yields',
+      'downside risk to yields',
+    ];
+    const positiveSignals = [
+      'higher yields',
+      'yields higher',
+      'rates higher',
+      'hawkish',
+      'repricing higher',
+      'upside risk to yields',
+      'tightening',
+      'rate hikes',
+      'hike rates',
+    ];
+
+    if (negativeSignals.some((signal) => normalized.includes(signal))) return -1;
+    if (positiveSignals.some((signal) => normalized.includes(signal))) return 1;
+    return null;
+  }
+
+  if (topic === 'CREDIT') {
+    const negativeSignals = [
+      'fiscal constraints',
+      'limit expansive credit policies',
+      'limited ability',
+      'tighter lending',
+      'tighter financing',
+      'restrictive credit',
+      'credit contraction',
+      'credit deterioration',
+      'wider spreads',
+      'widening spreads',
+      'deteriorating credit outlook',
+    ];
+    const positiveSignals = [
+      'tighter spreads',
+      'spread tightening',
+      'easier financing',
+      'supportive credit conditions',
+      'improving credit outlook',
+      'credit expansion',
+      'better credit conditions',
+    ];
+
+    if (negativeSignals.some((signal) => normalized.includes(signal))) return -1;
+    if (positiveSignals.some((signal) => normalized.includes(signal))) return 1;
+    return null;
+  }
+
+  return null;
+}
+
 function sortTopics(topics: TopicLabel[], selector: (label: TopicLabel) => number) {
   return [...topics]
     .sort((left, right) => {
@@ -154,7 +227,7 @@ export function formatTopicDirection(label: TopicLabel) {
   return getDirectionLabel(label.direction);
 }
 
-export function normalizeTopicLabel(value: unknown): TopicLabel | null {
+export function normalizeTopicLabel(value: unknown, options: NormalizeTopicLabelOptions = {}): TopicLabel | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const raw = value as RawTopicLabel;
@@ -164,8 +237,14 @@ export function normalizeTopicLabel(value: unknown): TopicLabel | null {
   const relevance = clampInteger(raw.relevance, 0, 3);
   const evidence = normalizeEvidence(raw.evidence, topic, relevance);
   let direction = relevance === 0 ? 0 : clampInteger(raw.direction, -2, 2);
-  if (topic === 'FX_USDTHB' && relevance > 0) {
+  if (!options.preserveManualDirection && topic === 'FX_USDTHB' && relevance > 0) {
     const inferredDirection = inferUsdThbDirectionFromEvidence(evidence);
+    if (inferredDirection !== null) {
+      direction = inferredDirection;
+    }
+  }
+  if (!options.preserveManualDirection && (topic === 'RATES' || topic === 'CREDIT') && relevance > 0) {
+    const inferredDirection = inferTopicDirectionFromEvidence(topic, evidence);
     if (inferredDirection !== null) {
       direction = inferredDirection;
     }
@@ -214,12 +293,12 @@ export function buildTopicSummary(labels: TopicLabel[]): TopicSummary {
   };
 }
 
-export function normalizeTopicSentiment(rawLabels: unknown, rawSummary?: unknown) {
+export function normalizeTopicSentiment(rawLabels: unknown, rawSummary?: unknown, options: NormalizeTopicLabelOptions = {}) {
   const labels = Array.isArray(rawLabels) ? rawLabels : [];
   const byTopic = new Map<TopicCode, TopicLabel>();
 
   for (const rawLabel of labels) {
-    const normalized = normalizeTopicLabel(rawLabel);
+    const normalized = normalizeTopicLabel(rawLabel, options);
     if (!normalized) continue;
     const existing = byTopic.get(normalized.topic);
     byTopic.set(normalized.topic, existing ? mergeTopicLabels(existing, normalized) : normalized);

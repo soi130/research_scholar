@@ -19,7 +19,7 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelection, onOpenLibrary }: { selectedPaperIds: number[], onOpenViewer?: (id: number) => void, onClearSelection?: () => void, onOpenLibrary?: () => void }) {
+export default function ChatPanel({ selectedPaperIds, onOpenViewer, onClearSelection, onOpenLibrary }: { selectedPaperIds: number[], onOpenViewer?: (id: number, cacheKey?: string) => void, onClearSelection?: () => void, onOpenLibrary?: () => void }) {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Hello! I'm your research assistant. I have access to your entire approved paper library, or you can select specific papers to focus on. How can I help you today?" }
   ]);

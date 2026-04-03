@@ -65,20 +65,20 @@ function buildQuickSearchClause(query: string) {
   const like = buildLikePattern(query);
   return {
     clause: `(
-      LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(authors, '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(publisher, '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(series_name, '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(published_date, '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(tags, '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(abstract, '')) LIKE ? ESCAPE '\\'
+      LOWER(COALESCE(p.title, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(p.authors, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(p.publisher, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(p.series_name, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(p.published_date, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(p.tags, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(p.abstract, '')) LIKE ? ESCAPE '\\'
     )`,
     params: [like, like, like, like, like, like, like],
   };
 }
 
 function buildMultiSelectClause(field: MultiSelectSearchField, values: string[]) {
-  const clauses = values.map(() => `LOWER(COALESCE(${field}, '')) LIKE ? ESCAPE '\\'`);
+  const clauses = values.map(() => `LOWER(COALESCE(p.${field}, '')) LIKE ? ESCAPE '\\'`);
   return {
     clause: `(${clauses.join(' OR ')})`,
     params: values.map(buildLikePattern),
@@ -96,8 +96,12 @@ function matchesPublishedDateRange(row: PaperRow, filters: AdvancedSearchFilters
 }
 
 function parsePaperRow(row: PaperRow) {
+  const extractionProvider = String(row.extraction_provider || '').trim().toLowerCase();
+  const extractionPromptVersion = String(row.extraction_prompt_version || '').trim().toLowerCase();
+
   return {
     ...row,
+    generated_locally: extractionProvider === 'local' || extractionPromptVersion.includes('local-fallback'),
     authors: row.authors ? JSON.parse(String(row.authors)) : [],
     key_findings: row.key_findings ? JSON.parse(String(row.key_findings)) : [],
     tags: row.tags ? JSON.parse(String(row.tags)) : [],
@@ -132,9 +136,10 @@ export async function GET(request: Request) {
       const params: (string | number)[] = [status, q];
 
       let sql = `
-        SELECT p.*
+        SELECT p.*, e.provider AS extraction_provider, e.prompt_version AS extraction_prompt_version
         FROM papers_fts f
         JOIN papers p ON p.id = f.rowid
+        LEFT JOIN paper_extractions e ON e.id = p.latest_extraction_id
         WHERE ${filters.join(' AND ')}
           AND f MATCH ?
         ORDER BY p.created_at DESC
@@ -152,6 +157,7 @@ export async function GET(request: Request) {
           SELECT COUNT(*) AS total
           FROM papers_fts f
           JOIN papers p ON p.id = f.rowid
+          LEFT JOIN paper_extractions e ON e.id = p.latest_extraction_id
           WHERE p.status = ?
             AND f MATCH ?
         `,
@@ -162,11 +168,12 @@ export async function GET(request: Request) {
       const { clause, params } = buildQuickSearchClause(q);
       const sqlParams: (string | number)[] = [status, ...params];
       let sql = `
-        SELECT *
-        FROM papers
-        WHERE status = ?
+        SELECT p.*, e.provider AS extraction_provider, e.prompt_version AS extraction_prompt_version
+        FROM papers AS p
+        LEFT JOIN paper_extractions e ON e.id = p.latest_extraction_id
+        WHERE p.status = ?
           AND ${clause}
-        ORDER BY created_at DESC
+        ORDER BY p.created_at DESC
       `;
 
       if (limit !== null) {
@@ -179,8 +186,9 @@ export async function GET(request: Request) {
       const totalRow = await db.get(
         `
           SELECT COUNT(*) AS total
-          FROM papers
-          WHERE status = ?
+          FROM papers AS p
+          LEFT JOIN paper_extractions e ON e.id = p.latest_extraction_id
+          WHERE p.status = ?
             AND ${clause}
         `,
         [status, ...params]
@@ -188,7 +196,7 @@ export async function GET(request: Request) {
       total = Number(totalRow?.total || 0);
     }
   } else {
-    const clauses: string[] = ['status = ?'];
+    const clauses: string[] = ['p.status = ?'];
     const params: (string | number)[] = [status];
 
     if (q) {
@@ -207,10 +215,11 @@ export async function GET(request: Request) {
 
     papers = await db.all(
       `
-        SELECT *
-        FROM papers
+        SELECT p.*, e.provider AS extraction_provider, e.prompt_version AS extraction_prompt_version
+        FROM papers AS p
+        LEFT JOIN paper_extractions e ON e.id = p.latest_extraction_id
         WHERE ${clauses.join(' AND ')}
-        ORDER BY created_at DESC
+        ORDER BY p.created_at DESC
       `,
       params
     );

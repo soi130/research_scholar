@@ -3,6 +3,7 @@ import { getDb, runInTransaction, runSerializedWrite } from './db';
 
 const SCAN_STATE_KEY = 'scan_state';
 const STALE_SCAN_MS = 1000 * 60 * 60 * 4;
+const STALE_SCAN_NO_PROGRESS_MS = 1000 * 60 * 2;
 
 export type ScanState = {
   status: 'idle' | 'running' | 'completed' | 'failed';
@@ -55,6 +56,32 @@ function safeParseScanState(raw: string | null | undefined): ScanState {
   }
 }
 
+function isStaleRunningScan(state: ScanState) {
+  if (state.status !== 'running' || !state.startedAt) return false;
+
+  const startedAt = new Date(state.startedAt).getTime();
+  if (!Number.isFinite(startedAt)) return false;
+
+  const ageMs = Date.now() - startedAt;
+  if (ageMs >= STALE_SCAN_MS) return true;
+
+  if ((state.stats.processed || 0) === 0 && ageMs >= STALE_SCAN_NO_PROGRESS_MS) {
+    return true;
+  }
+
+  return false;
+}
+
+function staleFailureState(state: ScanState): ScanState {
+  return {
+    ...state,
+    status: 'failed',
+    finishedAt: new Date().toISOString(),
+    token: null,
+    message: 'Previous scan stalled before making progress. Ready to retry.',
+  };
+}
+
 async function persistScanState(nextState: ScanState) {
   const db = await getDb();
   await db.run(
@@ -67,7 +94,19 @@ async function persistScanState(nextState: ScanState) {
 export async function getScanState(): Promise<ScanState> {
   const db = await getDb();
   const row = await db.get<{ value?: string }>(`SELECT value FROM app_meta WHERE key = ?`, [SCAN_STATE_KEY]);
-  return safeParseScanState(row?.value);
+  const current = safeParseScanState(row?.value);
+
+  if (isStaleRunningScan(current)) {
+    const nextState = staleFailureState(current);
+    await db.run(
+      `INSERT INTO app_meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SCAN_STATE_KEY, JSON.stringify(nextState)]
+    );
+    return nextState;
+  }
+
+  return current;
 }
 
 export async function tryStartScan(total: number) {
@@ -76,11 +115,8 @@ export async function tryStartScan(total: number) {
     const current = safeParseScanState(row?.value);
     const now = new Date().toISOString();
 
-    if (current.status === 'running' && current.startedAt) {
-      const startedAt = new Date(current.startedAt).getTime();
-      if (Number.isFinite(startedAt) && Date.now() - startedAt < STALE_SCAN_MS) {
-        return { started: false as const, state: current };
-      }
+    if (current.status === 'running' && !isStaleRunningScan(current)) {
+      return { started: false as const, state: current };
     }
 
     const nextState: ScanState = {

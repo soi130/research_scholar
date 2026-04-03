@@ -12,6 +12,7 @@ parser.on('pdfParser_dataReady', (data) => {
         for (const t of (line.R || [])) {
           try { text += decodeURIComponent(t.T) + ' '; } catch { text += t.T + ' '; }
         }
+        text += '\n';
       }
       text += '\n';
     }

@@ -25,6 +25,7 @@ interface Paper {
   topic_labels: TopicLabel[];
   topic_summary: TopicSummary;
   filename: string;
+  updated_at: string;
 }
 
 const renderValue = (v: unknown): string => {
@@ -51,7 +52,7 @@ function appendAdvancedSearchParams(params: URLSearchParams, filters: AdvancedSe
 
 export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery = '', searchFilters }: { 
   onSelectForChat: (ids: number[]) => void,
-  onOpenViewer?: (id: number) => void,
+  onOpenViewer?: (id: number, cacheKey?: string) => void,
   searchQuery?: string,
   searchFilters: AdvancedSearchFilters
 }) {
@@ -101,14 +102,10 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
       ? selected.filter(s => s !== id) 
       : [...selected, id];
     setSelected(newSelected);
-    // Only inform parent if we are multi-selecting. If the user clears, we pass empty.
-    onSelectForChat(newSelected);
   };
 
   const handleCardClick = (id: number) => {
     setSelected([id]);
-    onSelectForChat([id]);
-    if (onOpenViewer) onOpenViewer(id);
   };
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-violet-500 w-10 h-10" /></div>;
@@ -121,7 +118,10 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
             <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
             {selected.length} research papers selected
           </span>
-          <button className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 rounded-xl text-sm font-bold text-white flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-violet-600/20">
+          <button
+            onClick={() => onSelectForChat(selected)}
+            className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 rounded-xl text-sm font-bold text-white flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-violet-600/20"
+          >
             <MessageSquare size={16} /> Synthesize Chat
           </button>
         </div>
@@ -139,11 +139,11 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
             }`}
           >
             {/* 1st Page Preview (List Mode) */}
-            <div className="relative w-32 aspect-[3/4] bg-slate-100 rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all flex-shrink-0 shadow-inner">
-               <PdfThumbnail paperId={paper.id} className="w-full h-full" />
+            <div className="relative w-72 aspect-[3/4] bg-slate-100 rounded-2xl overflow-hidden border border-slate-200/50 group-hover:border-violet-500/20 transition-all flex-shrink-0 shadow-inner">
+               <PdfThumbnail paperId={paper.id} cacheKey={paper.updated_at} className="w-full h-full" />
                {/* Click to open badge */}
                <button
-                  onClick={(e) => { e.stopPropagation(); onOpenViewer?.(paper.id); }}
+                  onClick={(e) => { e.stopPropagation(); onOpenViewer?.(paper.id, paper.updated_at); }}
                   className="absolute inset-0 flex items-center justify-center bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity"
                >
                   <div className="bg-white/90 backdrop-blur-md p-2 rounded-xl text-violet-600 shadow-xl">
@@ -153,7 +153,7 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
             </div>
             
             <div className="flex-1 min-w-0 space-y-3">
-              <div className="flex justify-between items-start gap-4">
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_auto] gap-4 items-start">
                 <div className="min-w-0">
                   <h3 className="text-lg font-black text-slate-900 mb-1 leading-tight group-hover:text-violet-600 transition-colors truncate">
                     {paper.title}
@@ -162,19 +162,40 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
                     { (paper.authors || []).slice(0, 3).join(', ') } { (paper.authors || []).length > 3 ? '...' : ''}
                   </p>
                 </div>
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                {(paper.series_name || paper.tags?.length > 0) ? (
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-start xl:pt-0.5">
+                    {paper.series_name ? (
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-[color:var(--border)] max-w-full">
+                        <FolderKanban size={12} className="text-violet-600 flex-shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Series</span>
+                        <span className="text-[11px] font-bold text-slate-800 truncate">{paper.series_name}</span>
+                      </div>
+                    ) : null}
+                    {paper.tags?.map((tag) => (
+                      <span key={tag} className="text-[9px] font-bold text-[var(--foreground)] bg-[var(--surface-muted)] px-2 py-1 rounded-full border border-[color:var(--border)]">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="hidden xl:block" />
+                )}
+                <div className="mr-10 flex flex-col items-start xl:items-end gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectForChat([paper.id]);
+                    }}
+                    className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 rounded-xl text-[10px] font-black uppercase tracking-[0.14em] text-white flex items-center gap-1.5 transition-all active:scale-95 shadow-lg shadow-violet-600/20"
+                  >
+                    <MessageSquare size={12} />
+                    Chat With Paper
+                  </button>
                   <span className="text-[10px] font-black text-slate-900 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200/50">{paper.publisher || 'N/A'}</span>
                   <span className="text-[9px] text-slate-400 font-bold">{paper.published_date || 'N/A'}</span>
                 </div>
               </div>
-
-              {paper.series_name ? (
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-muted)] rounded-xl border border-[color:var(--border)] w-fit">
-                  <FolderKanban size={12} className="text-violet-600" />
-                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Series</span>
-                  <span className="text-[11px] font-bold text-slate-800">{paper.series_name}</span>
-                </div>
-              ) : null}
 
               {paper.forecasts && Object.keys(paper.forecasts).length > 0 && (
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -188,53 +209,38 @@ export default function LibraryView({ onSelectForChat, onOpenViewer, searchQuery
               )}
 
               <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.9fr] gap-4">
-                <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Summary</p>
-                  <p className="text-sm leading-6 text-slate-700">
-                    {paper.abstract || 'No summary available.'}
-                  </p>
-                </div>
-
-                <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">3 KTAs</p>
-                  {paper.key_findings && paper.key_findings.length > 0 ? (
-                    <ol className="space-y-2">
-                      {paper.key_findings.slice(0, 3).map((finding, index) => (
-                        <li key={`${paper.id}-${index}`} className="flex gap-3 text-sm text-slate-700">
-                          <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-black flex items-center justify-center flex-shrink-0">
-                            {index + 1}
-                          </span>
-                          <span className="leading-6">{finding}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : (
-                    <p className="text-sm text-slate-400">No key takeaways available.</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-4 p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)]">
-                {Object.entries(paper.forecasts || {}).slice(0, 4).map(([k, v]) => (
-                  <div key={k} className="space-y-0.5 min-w-0">
-                    <span className="text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate block">{k}</span>
-                    <span className="text-[11px] text-slate-900 font-bold truncate block">{renderValue(v)}</span>
+                <div className="space-y-4">
+                  <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Summary</p>
+                    <p className="text-sm leading-6 text-slate-700">
+                      {paper.abstract || 'No summary available.'}
+                    </p>
                   </div>
-                ))}
-                {Object.keys(paper.forecasts || {}).length === 0 && <p className="text-[9px] text-slate-300 italic col-span-4">No specific forecasts extracted.</p>}
-              </div>
 
-              <TopicSentimentPanel topicLabels={paper.topic_labels || []} topicSummary={paper.topic_summary} />
+                  <div className="p-4 bg-[var(--surface-soft)] rounded-2xl border border-[color:var(--border)] space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">3 KTAs</p>
+                    {paper.key_findings && paper.key_findings.length > 0 ? (
+                      <ol className="space-y-2">
+                        {paper.key_findings.slice(0, 3).map((finding, index) => (
+                          <li key={`${paper.id}-${index}`} className="flex gap-3 text-sm text-slate-700">
+                            <span className="mt-0.5 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-black flex items-center justify-center flex-shrink-0">
+                              {index + 1}
+                            </span>
+                            <span className="leading-6">{finding}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="text-sm text-slate-400">No key takeaways available.</p>
+                    )}
+                  </div>
 
-              {paper.tags && paper.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {paper.tags.map((tag) => (
-                    <span key={tag} className="text-[9px] font-bold text-[var(--foreground)] bg-[var(--surface-muted)] px-2 py-0.5 rounded-full border border-[color:var(--border)]">
-                      #{tag}
-                    </span>
-                  ))}
                 </div>
-              )}
+
+                <div className="space-y-4">
+                  <TopicSentimentPanel topicLabels={paper.topic_labels || []} topicSummary={paper.topic_summary} />
+                </div>
+              </div>
             </div>
 
             {/* Selection indicator */}

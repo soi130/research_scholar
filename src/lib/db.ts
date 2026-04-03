@@ -2,9 +2,35 @@ import sqlite3 from 'sqlite3';
 import { open, Database } from 'sqlite';
 import path from 'path';
 import fs from 'fs';
+import { inferForecastIndicatorCode } from './forecast-indicators';
 
-let db: Database | null = null;
-let writeQueue: Promise<unknown> = Promise.resolve();
+type DbState = {
+  db: Database | null;
+  dbPromise: Promise<Database> | null;
+  writeQueue: Promise<unknown>;
+  dbInode: number | null;
+};
+
+const globalDbState = globalThis as typeof globalThis & {
+  __paperLibraryDbState?: DbState;
+};
+
+const state =
+  globalDbState.__paperLibraryDbState ??
+  (globalDbState.__paperLibraryDbState = {
+    db: null,
+    dbPromise: null,
+    writeQueue: Promise.resolve(),
+    dbInode: null,
+  });
+
+function getDbInode(dbPath: string) {
+  try {
+    return fs.statSync(dbPath).ino;
+  } catch {
+    return null;
+  }
+}
 
 async function configureDb(database: Database) {
   await database.exec(`
@@ -17,25 +43,31 @@ async function configureDb(database: Database) {
 
 export async function getDb(): Promise<Database> {
   const dbPath = path.join(process.cwd(), 'papers.db');
-  
-  if (db && !fs.existsSync(dbPath)) {
+
+  const currentInode = getDbInode(dbPath);
+
+  if (state.db && (!currentInode || (state.dbInode !== null && currentInode !== state.dbInode))) {
     console.log("Database file was deleted, resetting connection...");
-    try { await db.close(); } catch {}
-    db = null;
+    try { await state.db.close(); } catch {}
+    state.db = null;
+    state.dbPromise = null;
+    state.dbInode = null;
   }
 
-  if (db) return db;
+  if (state.db) return state.db;
+  if (state.dbPromise) return state.dbPromise;
 
-  console.log(`Connecting to database at: ${dbPath}`);
-  
-  db = await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
+  state.dbPromise = (async () => {
+    console.log(`Connecting to database at: ${dbPath}`);
 
-  await configureDb(db);
+    const database = await open({
+      filename: dbPath,
+      driver: sqlite3.Database
+    });
 
-  await db.exec(`
+    await configureDb(database);
+
+    await database.exec(`
     CREATE TABLE IF NOT EXISTS papers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT UNIQUE,
@@ -73,6 +105,7 @@ export async function getDb(): Promise<Database> {
       filepath TEXT,
       publish_date TEXT,
       indicator TEXT,
+      indicator_code TEXT,
       house TEXT,
       value TEXT,
       unit TEXT,
@@ -80,6 +113,24 @@ export async function getDb(): Promise<Database> {
       source_text TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS manual_key_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      paper_id INTEGER,
+      paper_name TEXT,
+      publish_date TEXT NOT NULL DEFAULT '',
+      indicator TEXT NOT NULL DEFAULT '',
+      indicator_code TEXT,
+      house TEXT NOT NULL DEFAULT '',
+      value TEXT NOT NULL DEFAULT '',
+      unit TEXT NOT NULL DEFAULT '',
+      forecast_period TEXT NOT NULL DEFAULT '',
+      source_text TEXT NOT NULL DEFAULT '',
+      source_type TEXT NOT NULL DEFAULT 'manual_input',
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS paper_extractions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,6 +198,10 @@ export async function getDb(): Promise<Database> {
     CREATE INDEX IF NOT EXISTS idx_paper_key_calls_publish_date ON paper_key_calls(publish_date);
     CREATE INDEX IF NOT EXISTS idx_paper_key_calls_indicator ON paper_key_calls(indicator);
     CREATE INDEX IF NOT EXISTS idx_paper_key_calls_house ON paper_key_calls(house);
+    CREATE INDEX IF NOT EXISTS idx_manual_key_calls_paper_id ON manual_key_calls(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_manual_key_calls_indicator_code ON manual_key_calls(indicator_code);
+    CREATE INDEX IF NOT EXISTS idx_manual_key_calls_house ON manual_key_calls(house);
+    CREATE INDEX IF NOT EXISTS idx_manual_key_calls_publish_date ON manual_key_calls(publish_date);
     CREATE INDEX IF NOT EXISTS idx_paper_extractions_paper_id_created_at ON paper_extractions(paper_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_paper_extractions_file_hash ON paper_extractions(file_hash);
     CREATE INDEX IF NOT EXISTS idx_paper_topic_labels_paper_id ON paper_topic_labels(paper_id);
@@ -157,61 +212,106 @@ export async function getDb(): Promise<Database> {
     CREATE INDEX IF NOT EXISTS idx_research_facts_source_house ON research_facts(source_house);
   `);
 
+  const paperKeyCallColumns = await database.all<Array<{ name: string }>>(`PRAGMA table_info(paper_key_calls)`);
+  const hasIndicatorCode = paperKeyCallColumns.some((column) => column.name === 'indicator_code');
+
+  if (!hasIndicatorCode) {
+    try {
+      await database.exec(`ALTER TABLE paper_key_calls ADD COLUMN indicator_code TEXT`);
+    } catch {}
+  }
   try {
-    await db.exec(`ALTER TABLE papers ADD COLUMN publisher TEXT`);
+    await database.exec(`ALTER TABLE papers ADD COLUMN publisher TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE papers ADD COLUMN series_name TEXT`);
+    await database.exec(`ALTER TABLE papers ADD COLUMN series_name TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE papers ADD COLUMN forecasts TEXT`);
+    await database.exec(`ALTER TABLE papers ADD COLUMN forecasts TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE papers ADD COLUMN latest_extraction_id INTEGER`);
+    await database.exec(`ALTER TABLE papers ADD COLUMN latest_extraction_id INTEGER`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE papers ADD COLUMN topic_labels TEXT`);
+    await database.exec(`ALTER TABLE papers ADD COLUMN topic_labels TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE papers ADD COLUMN topic_summary TEXT`);
+    await database.exec(`ALTER TABLE papers ADD COLUMN topic_summary TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_fact_type TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_fact_type TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_stance TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_stance TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_subject TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_subject TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_entity_or_scope TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_entity_or_scope TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_metric TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_metric TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_value_number REAL`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_value_number REAL`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_unit TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_unit TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_time_reference TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_time_reference TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_by TEXT`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_by TEXT`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_at DATETIME`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN reviewed_at DATETIME`);
   } catch {}
   try {
-    await db.exec(`ALTER TABLE research_facts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await database.exec(`ALTER TABLE research_facts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+  } catch {}
+  try {
+    await database.exec(`ALTER TABLE manual_key_calls ADD COLUMN indicator_code TEXT`);
+  } catch {}
+  try {
+    await database.exec(`ALTER TABLE manual_key_calls ADD COLUMN source_type TEXT NOT NULL DEFAULT 'manual_input'`);
+  } catch {}
+  try {
+    await database.exec(`ALTER TABLE manual_key_calls ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+  } catch {}
+  try {
+    await database.exec(`ALTER TABLE manual_key_calls ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`);
   } catch {}
 
-  // Full-text search index for scalable paper search and retrieval.
+  const migratedPaperKeyCallColumns = await database.all<Array<{ name: string }>>(`PRAGMA table_info(paper_key_calls)`);
+  const hasIndicatorCodeAfterMigration = migratedPaperKeyCallColumns.some((column) => column.name === 'indicator_code');
+
+  if (hasIndicatorCodeAfterMigration) {
+    await database.exec(`CREATE INDEX IF NOT EXISTS idx_paper_key_calls_indicator_code ON paper_key_calls(indicator_code)`);
+
+    const existingKeyCalls = await database.all<Array<{ id: number; indicator: string; indicator_code: string | null }>>(
+      `SELECT id, indicator, indicator_code FROM paper_key_calls`
+    );
+    for (const keyCall of existingKeyCalls) {
+      const inferredCode = inferForecastIndicatorCode(String(keyCall.indicator ?? ''));
+      if ((keyCall.indicator_code ?? '') === (inferredCode ?? '')) continue;
+      await database.run(`UPDATE paper_key_calls SET indicator_code = ? WHERE id = ?`, [inferredCode, keyCall.id]);
+    }
+  }
+
+  const existingManualKeyCalls = await database.all<Array<{ id: number; indicator: string; indicator_code: string | null }>>(
+    `SELECT id, indicator, indicator_code FROM manual_key_calls`
+  );
+  for (const keyCall of existingManualKeyCalls) {
+    const inferredCode = inferForecastIndicatorCode(String(keyCall.indicator ?? ''));
+    if ((keyCall.indicator_code ?? '') === (inferredCode ?? '')) continue;
+    await database.run(`UPDATE manual_key_calls SET indicator_code = ? WHERE id = ?`, [inferredCode, keyCall.id]);
+  }
+
+    // Full-text search index for scalable paper search and retrieval.
   try {
-    await db.exec(`
+    await database.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
         title,
         authors,
@@ -224,21 +324,21 @@ export async function getDb(): Promise<Database> {
       );
     `);
 
-    await db.exec(`
+    await database.exec(`
       CREATE TRIGGER IF NOT EXISTS papers_ai AFTER INSERT ON papers BEGIN
         INSERT INTO papers_fts(rowid, title, authors, publisher, abstract, key_findings, tags)
         VALUES (new.id, new.title, new.authors, new.publisher, new.abstract, new.key_findings, new.tags);
       END;
     `);
 
-    await db.exec(`
+    await database.exec(`
       CREATE TRIGGER IF NOT EXISTS papers_ad AFTER DELETE ON papers BEGIN
         INSERT INTO papers_fts(papers_fts, rowid, title, authors, publisher, abstract, key_findings, tags)
         VALUES ('delete', old.id, old.title, old.authors, old.publisher, old.abstract, old.key_findings, old.tags);
       END;
     `);
 
-    await db.exec(`
+    await database.exec(`
       CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
         INSERT INTO papers_fts(papers_fts, rowid, title, authors, publisher, abstract, key_findings, tags)
         VALUES ('delete', old.id, old.title, old.authors, old.publisher, old.abstract, old.key_findings, old.tags);
@@ -247,10 +347,10 @@ export async function getDb(): Promise<Database> {
       END;
     `);
 
-    const ftsBuilt = await db.get(`SELECT value FROM app_meta WHERE key = 'papers_fts_built'`);
+    const ftsBuilt = await database.get(`SELECT value FROM app_meta WHERE key = 'papers_fts_built'`);
     if (!ftsBuilt?.value) {
-      await db.exec(`INSERT INTO papers_fts(papers_fts) VALUES ('rebuild')`);
-      await db.run(
+      await database.exec(`INSERT INTO papers_fts(papers_fts) VALUES ('rebuild')`);
+      await database.run(
         `INSERT INTO app_meta (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
         ['papers_fts_built', '1']
@@ -261,12 +361,20 @@ export async function getDb(): Promise<Database> {
     console.warn('FTS5 setup skipped:', e);
   }
 
-  return db;
+    state.db = database;
+    state.dbInode = getDbInode(dbPath);
+    return database;
+  })().catch((error) => {
+    state.dbPromise = null;
+    throw error;
+  });
+
+  return state.dbPromise;
 }
 
 export async function runSerializedWrite<T>(operation: (database: Database) => Promise<T>): Promise<T> {
-  const run = writeQueue.then(async () => operation(await getDb()));
-  writeQueue = run.catch(() => undefined);
+  const run = state.writeQueue.then(async () => operation(await getDb()));
+  state.writeQueue = run.catch(() => undefined);
   return run;
 }
 
@@ -287,12 +395,14 @@ export async function runInTransaction<T>(operation: (database: Database) => Pro
 export async function resetDatabaseFile() {
   const dbPath = path.join(process.cwd(), 'papers.db');
 
-  if (db) {
+  if (state.db) {
     try {
-      await db.close();
+      await state.db.close();
     } catch {}
-    db = null;
+    state.db = null;
   }
+  state.dbPromise = null;
+  state.dbInode = null;
 
   for (const suffix of ['', '-shm', '-wal']) {
     const target = `${dbPath}${suffix}`;
@@ -305,5 +415,5 @@ export async function resetDatabaseFile() {
     }
   }
 
-  writeQueue = Promise.resolve();
+  state.writeQueue = Promise.resolve();
 }

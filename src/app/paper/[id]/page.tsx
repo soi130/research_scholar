@@ -6,6 +6,7 @@ import { ArrowLeft, Calendar, Building2, Layers, PanelLeftOpen, PanelRightClose,
 import Link from 'next/link';
 import PaperNeighborhoodGraph from '@/components/PaperNeighborhoodGraph';
 import PdfPageThumbnails from '@/components/PdfPageThumbnails';
+import GeneratedLocallyBadge from '@/components/GeneratedLocallyBadge';
 
 interface Paper {
   id: number;
@@ -16,6 +17,7 @@ interface Paper {
   published_date: string;
   abstract: string;
   tags: string[];
+  generated_locally?: boolean;
 }
 
 export default function PaperViewerPage() {
@@ -97,6 +99,7 @@ export default function PaperViewerPage() {
                 <Building2 size={20} />
              </div>
              <h1 className="text-2xl font-black text-slate-900 leading-tight tracking-tight">{paper.title}</h1>
+             {paper.generated_locally ? <GeneratedLocallyBadge /> : null}
           </div>
 
           <div className="space-y-4 text-xs font-bold text-slate-500">

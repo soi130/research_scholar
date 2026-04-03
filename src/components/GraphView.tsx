@@ -256,7 +256,7 @@ export default function GraphView({
   onOpenViewer,
 }: {
   searchQuery?: string;
-  onOpenViewer?: (id: number) => void;
+  onOpenViewer?: (id: number, cacheKey?: string) => void;
 }) {
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
   const [loading, setLoading] = useState(false);
