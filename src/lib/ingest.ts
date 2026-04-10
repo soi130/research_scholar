@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import PDFParser from 'pdf2json';
-import { getDb, runInTransaction } from './db';
+import { PDFParse } from 'pdf-parse';
+import { getDb, runInTransaction, runSerializedWrite } from './db';
 import { extractMetadataFromPDF, getActiveExtractionEngine } from './ai';
 import { finishScan, tryStartScan, updateScanProgress } from './scan-state';
 import { normalizeTopicSentiment } from './topic-sentiment';
@@ -15,6 +16,19 @@ type PdfPage = { Texts: PdfTextLine[] };
 type PdfReadyPayload = { Pages: PdfPage[] };
 type PdfErrorPayload = Error | { parserError: Error };
 type ExtractedMetadata = Awaited<ReturnType<typeof extractMetadataFromPDF>>;
+type IngestOutcome =
+  | { status: 'ingested' }
+  | { status: 'skipped'; stage: 'dedupe'; reason: 'duplicate'; errorMessage?: string }
+  | {
+      status: 'failed';
+      stage: 'db' | 'read' | 'parse' | 'ai' | 'persist' | 'unexpected';
+      reason: string;
+      errorMessage: string;
+    };
+
+PDFParse.setWorker(
+  path.join(process.cwd(), 'node_modules', 'pdf-parse', 'dist', 'worker', 'pdf.worker.mjs')
+);
 
 function shouldIgnoreEntry(name: string) {
   return name.startsWith('.');
@@ -63,7 +77,7 @@ function normalizeForecasts(value: unknown): Record<string, string> {
   );
 }
 
-async function extractTextFromPDF(filepath: string): Promise<string> {
+async function extractTextWithPdf2Json(filepath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const pdfParser = new PDFParser();
     
@@ -110,6 +124,30 @@ async function extractTextFromPDF(filepath: string): Promise<string> {
   });
 }
 
+async function extractTextWithPdfParse(filepath: string): Promise<string> {
+  const parser = new PDFParse({ data: fs.readFileSync(filepath) });
+
+  try {
+    const result = await Promise.race([
+      parser.getText(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('pdf-parse timed out')), 45000)),
+    ]);
+
+    return String(result?.text || '');
+  } finally {
+    await parser.destroy().catch(() => undefined);
+  }
+}
+
+async function extractTextFromPDF(filepath: string): Promise<string> {
+  try {
+    return await extractTextWithPdf2Json(filepath);
+  } catch (error) {
+    console.warn(`[INGEST] pdf2json failed for ${path.basename(filepath)}. Falling back to pdf-parse.`, error);
+    return extractTextWithPdfParse(filepath);
+  }
+}
+
 export async function ingestPaper(filepath: string) {
   const filename = path.basename(filepath);
   let db;
@@ -117,34 +155,75 @@ export async function ingestPaper(filepath: string) {
     db = await getDb();
   } catch (err) {
     console.error(`[INGEST] CRITICAL: DB Error:`, err);
-    return { status: 'failed' as const, reason: 'db' };
+    return {
+      status: 'failed' as const,
+      stage: 'db' as const,
+      reason: 'db_connection',
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
   }
   
   try {
-    const fileBuffer = fs.readFileSync(filepath);
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = fs.readFileSync(filepath);
+    } catch (err) {
+      console.error(`[INGEST] Read failed ${filename}:`, err);
+      return {
+        status: 'failed' as const,
+        stage: 'read' as const,
+        reason: 'read_failed',
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
+
     const hash = crypto.createHash('md5').update(fileBuffer).digest('hex');
     
     const existing = await db.get('SELECT id FROM papers WHERE hash = ?', [hash]);
     if (existing) {
       console.log(`[INGEST] Skipping (Already exists): ${filename}`);
-      return { status: 'skipped' as const, reason: 'duplicate' };
+      return { status: 'skipped' as const, stage: 'dedupe' as const, reason: 'duplicate' as const };
     }
 
     console.log(`[INGEST] Processing: ${filename}`);
     
-    // Race with a total timeout for this paper (60 seconds)
-    const result = await Promise.race([
-      (async () => {
-        const text = await extractTextFromPDF(filepath);
-        const metadata = await extractMetadataFromPDF(text);
-        return metadata;
-      })(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 60000))
-    ]) as ExtractedMetadata;
+    let extractedText = '';
+    try {
+      extractedText = await extractTextFromPDF(filepath);
+    } catch (err) {
+      console.error(`[INGEST] Parse failed ${filename}:`, err);
+      return {
+        status: 'failed' as const,
+        stage: 'parse' as const,
+        reason: 'pdf_parse_failed',
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    let result: ExtractedMetadata;
+    try {
+      result = await Promise.race([
+        extractMetadataFromPDF(extractedText),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI extraction timed out')), 60000)),
+      ]);
+    } catch (err) {
+      console.error(`[INGEST] AI failed ${filename}:`, err);
+      return {
+        status: 'failed' as const,
+        stage: 'ai' as const,
+        reason: 'metadata_extraction_failed',
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
     
     if (!result) {
       console.error(`[INGEST] AI Error for ${filename}`);
-      return { status: 'failed' as const, reason: 'ai' };
+      return {
+        status: 'failed' as const,
+        stage: 'ai' as const,
+        reason: 'empty_metadata',
+        errorMessage: 'Metadata extractor returned no result.',
+      };
     }
 
     const normalizedTitle = normalizeString(result.title) || filename;
@@ -184,131 +263,168 @@ export async function ingestPaper(filepath: string) {
       hash,
     };
 
-    await runInTransaction(async (database) => {
-      const insertResult = await database.run(`
-        INSERT INTO papers (
-          hash, filename, filepath, title, authors, published_date, publisher, series_name, journal, abstract, key_findings, forecasts, topic_labels, topic_summary, tags, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        hash, filename, filepath,
-        normalizedTitle,
-        JSON.stringify(result.authors || []),
-        normalizedPublishedDate,
-        normalizedPublisher,
-        normalizeString(result.series_name),
-        normalizeString(result.journal),
-        normalizedSummary,
-        JSON.stringify(normalizedKeyFindings),
-        JSON.stringify(normalizedForecasts),
-        JSON.stringify(normalizedTopicSentiment.labels),
-        JSON.stringify(normalizedTopicSentiment.summary),
-        JSON.stringify(result.tags || []),
-        'pending'
-      ]);
-
-      const paperId = Number(insertResult.lastID);
-      if (!Number.isFinite(paperId)) return;
-
-      const extractionResult = await database.run(
-        `
-          INSERT INTO paper_extractions (
-            paper_id, file_hash, provider, model, prompt_version, extraction_payload
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        `,
-          [
-          paperId,
-          hash,
-          generatedLocally ? 'local' : extractionEngine.provider,
-          generatedLocally ? 'heuristic-parser' : extractionEngine.model,
-          generatedLocally ? `${extractionEngine.promptVersion}-local-fallback` : extractionEngine.promptVersion,
-          JSON.stringify(extractionPayload),
-        ]
-      );
-
-      const extractionId = Number(extractionResult.lastID);
-
-      await database.run(
-        `UPDATE papers
-         SET forecasts = ?, topic_labels = ?, topic_summary = ?, latest_extraction_id = ?
-         WHERE id = ?`,
-        [
+    try {
+      await runInTransaction(async (database) => {
+        const insertResult = await database.run(`
+          INSERT INTO papers (
+            hash, filename, filepath, title, authors, published_date, publisher, series_name, journal, abstract, key_findings, forecasts, topic_labels, topic_summary, tags, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          hash, filename, filepath,
+          normalizedTitle,
+          JSON.stringify(result.authors || []),
+          normalizedPublishedDate,
+          normalizedPublisher,
+          normalizeString(result.series_name),
+          normalizeString(result.journal),
+          normalizedSummary,
+          JSON.stringify(normalizedKeyFindings),
           JSON.stringify(normalizedForecasts),
           JSON.stringify(normalizedTopicSentiment.labels),
           JSON.stringify(normalizedTopicSentiment.summary),
-          Number.isFinite(extractionId) ? extractionId : null,
-          paperId,
-        ]
-      );
+          JSON.stringify(result.tags || []),
+          'pending'
+        ]);
 
-      for (const topicLabel of normalizedTopicSentiment.labels) {
-        await database.run(
+        const paperId = Number(insertResult.lastID);
+        if (!Number.isFinite(paperId)) return;
+
+        const extractionResult = await database.run(
           `
-            INSERT INTO paper_topic_labels (
-              paper_id, topic_code, relevance, direction, confidence, evidence, regime, drivers, display_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO paper_extractions (
+              paper_id, file_hash, provider, model, prompt_version, extraction_payload
+            ) VALUES (?, ?, ?, ?, ?, ?)
           `,
-          [
+            [
             paperId,
-            topicLabel.topic,
-            topicLabel.relevance,
-            topicLabel.direction,
-            topicLabel.confidence,
-            topicLabel.evidence,
-            topicLabel.regime || null,
-            JSON.stringify(topicLabel.drivers || []),
-            JSON.stringify(topicLabel.display || {}),
+            hash,
+            generatedLocally ? 'local' : extractionEngine.provider,
+            generatedLocally ? 'heuristic-parser' : extractionEngine.model,
+            generatedLocally ? `${extractionEngine.promptVersion}-local-fallback` : extractionEngine.promptVersion,
+            JSON.stringify(extractionPayload),
           ]
         );
-      }
 
-      for (const fact of normalizedResearchFacts) {
+        const extractionId = Number(extractionResult.lastID);
+
         await database.run(
-          `
-            INSERT INTO research_facts (
-              paper_id,
-              source_house,
-              fact_type,
-              stance,
-              subject,
-              entity_or_scope,
-              metric,
-              value_number,
-              unit,
-              time_reference,
-              evidence_text,
-              evidence_page,
-              confidence,
-              ambiguity_flags,
-              review_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `,
+          `UPDATE papers
+           SET forecasts = ?, topic_labels = ?, topic_summary = ?, latest_extraction_id = ?
+           WHERE id = ?`,
           [
+            JSON.stringify(normalizedForecasts),
+            JSON.stringify(normalizedTopicSentiment.labels),
+            JSON.stringify(normalizedTopicSentiment.summary),
+            Number.isFinite(extractionId) ? extractionId : null,
             paperId,
-            fact.source_house,
-            fact.fact_type,
-            fact.stance,
-            fact.subject,
-            fact.entity_or_scope,
-            fact.metric,
-            fact.value_number,
-            fact.unit,
-            fact.time_reference,
-            fact.evidence_text,
-            fact.evidence_page,
-            fact.confidence,
-            JSON.stringify(fact.ambiguity_flags),
-            fact.review_status,
           ]
         );
-      }
-    });
+
+        for (const topicLabel of normalizedTopicSentiment.labels) {
+          await database.run(
+            `
+              INSERT INTO paper_topic_labels (
+                paper_id, topic_code, relevance, direction, confidence, evidence, regime, drivers, display_json
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+              paperId,
+              topicLabel.topic,
+              topicLabel.relevance,
+              topicLabel.direction,
+              topicLabel.confidence,
+              topicLabel.evidence,
+              topicLabel.regime || null,
+              JSON.stringify(topicLabel.drivers || []),
+              JSON.stringify(topicLabel.display || {}),
+            ]
+          );
+        }
+
+        for (const fact of normalizedResearchFacts) {
+          await database.run(
+            `
+              INSERT INTO research_facts (
+                paper_id,
+                source_house,
+                fact_type,
+                stance,
+                subject,
+                entity_or_scope,
+                metric,
+                value_number,
+                unit,
+                time_reference,
+                evidence_text,
+                evidence_page,
+                confidence,
+                ambiguity_flags,
+                review_status
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+              paperId,
+              fact.source_house,
+              fact.fact_type,
+              fact.stance,
+              fact.subject,
+              fact.entity_or_scope,
+              fact.metric,
+              fact.value_number,
+              fact.unit,
+              fact.time_reference,
+              fact.evidence_text,
+              fact.evidence_page,
+              fact.confidence,
+              JSON.stringify(fact.ambiguity_flags),
+              fact.review_status,
+            ]
+          );
+        }
+      });
+    } catch (err) {
+      console.error(`[INGEST] Persist failed ${filename}:`, err);
+      return {
+        status: 'failed' as const,
+        stage: 'persist' as const,
+        reason: 'db_persist_failed',
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
     
     console.log(`[INGEST] Success: ${filename}`);
     return { status: 'ingested' as const };
   } catch (err) {
     console.error(`[INGEST] Failed ${filename}:`, err);
-    return { status: 'failed' as const, reason: 'unexpected' };
+    return {
+      status: 'failed' as const,
+      stage: 'unexpected' as const,
+      reason: 'unexpected',
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
   }
+}
+
+async function persistScanFileOutcome(token: string, filepath: string, outcome: IngestOutcome) {
+  const filename = path.basename(filepath);
+  await runSerializedWrite(async (database) => {
+    await database.run(
+      `
+        INSERT INTO scan_file_logs (
+          scan_token, filename, filepath, status, stage, reason, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        token,
+        filename,
+        filepath,
+        outcome.status,
+        outcome.status === 'ingested' ? 'completed' : outcome.stage,
+        outcome.status === 'ingested' ? '' : outcome.reason,
+        outcome.status === 'failed' ? outcome.errorMessage : '',
+      ]
+    );
+  });
 }
 
 async function runScanFolder(folderPath: string, token: string) {
@@ -329,7 +445,10 @@ async function runScanFolder(folderPath: string, token: string) {
       console.log(`[SCAN] Batch ${Math.floor(i/CONCURRENCY) + 1}/${Math.ceil(files.length/CONCURRENCY)}`);
       const outcomes = await Promise.all(batch.map(file => ingestPaper(file)));
       processed += batch.length;
-      for (const outcome of outcomes) {
+      for (let outcomeIndex = 0; outcomeIndex < outcomes.length; outcomeIndex += 1) {
+        const outcome = outcomes[outcomeIndex];
+        const file = batch[outcomeIndex];
+        await persistScanFileOutcome(token, file, outcome);
         if (outcome?.status === 'failed') failed += 1;
         if (outcome?.status === 'ingested' || outcome?.status === 'skipped') succeeded += 1;
       }

@@ -11,14 +11,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Share2,
-  Moon,
-  SunMedium,
-  LogOut,
   SlidersHorizontal,
   X,
   TriangleAlert,
   Loader2,
   Edit3,
+  FileWarning,
 } from 'lucide-react';
 import ReviewGrid from './ReviewGrid';
 import LibraryView from './LibraryView';
@@ -50,24 +48,23 @@ function sliderValueToDate(value: number) {
   return new Date(value * 86400000).toISOString().slice(0, 10);
 }
 
-function getPreferredTheme(): 'light' | 'dark' {
-  if (typeof window === 'undefined') return 'light';
-
-  const storedTheme = window.localStorage.getItem('scholar-theme');
-  if (storedTheme === 'dark' || storedTheme === 'light') {
-    return storedTheme;
-  }
-
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
 export default function DashboardLayout() {
   type View = 'library' | 'review' | 'chat' | 'graph' | 'keyCalls';
-  type Theme = 'light' | 'dark';
   type ScanState = {
     status: 'idle' | 'running' | 'completed' | 'failed';
     message: string | null;
     stats: { total: number; processed: number; succeeded: number; failed: number };
+  };
+  type ScanFileLog = {
+    id: number;
+    scan_token: string | null;
+    filename: string;
+    filepath: string;
+    status: string;
+    stage: string;
+    reason: string;
+    error_message: string;
+    created_at: string | null;
   };
 
   const [view, setView] = useState<View>('library');
@@ -90,14 +87,13 @@ export default function DashboardLayout() {
   });
   const [draftSearchFilters, setDraftSearchFilters] = useState<AdvancedSearchFilters>(createDefaultAdvancedSearchDraft());
   const [searchFilters, setSearchFilters] = useState<AdvancedSearchFilters>(createEmptyAdvancedSearchFilters());
-  const [theme, setTheme] = useState<Theme>('light');
   const [devMode, setDevMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isResettingDevData, setIsResettingDevData] = useState(false);
-
-  useEffect(() => {
-    setTheme(getPreferredTheme());
-  }, []);
+  const [scanFileLogs, setScanFileLogs] = useState<ScanFileLog[]>([]);
+  const [scanFileLogToken, setScanFileLogToken] = useState<string | null>(null);
+  const [isLoadingScanFileLogs, setIsLoadingScanFileLogs] = useState(false);
+  const [scanFileLogsError, setScanFileLogsError] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -105,11 +101,13 @@ export default function DashboardLayout() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    document.documentElement.style.colorScheme = theme;
-    window.localStorage.setItem('scholar-theme', theme);
-  }, [theme]);
+    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.classList.add('dark');
+    document.documentElement.style.colorScheme = 'dark';
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('scholar-theme', 'dark');
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -137,6 +135,73 @@ export default function DashboardLayout() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!showSettings || !devMode) return;
+
+    let active = true;
+
+    const loadScanFileLogs = async () => {
+      setIsLoadingScanFileLogs(true);
+      setScanFileLogsError('');
+
+      try {
+        const response = await fetch('/api/dev/scan-file-logs?limit=40');
+        const data = await response.json().catch(() => ({}));
+
+        if (!active) return;
+
+        if (!response.ok) {
+          setScanFileLogs([]);
+          setScanFileLogToken(null);
+          setScanFileLogsError(data?.error || 'Unable to load scan file logs.');
+          return;
+        }
+
+        setScanFileLogs(Array.isArray(data?.rows) ? data.rows : []);
+        setScanFileLogToken(typeof data?.latestScanToken === 'string' ? data.latestScanToken : null);
+      } catch {
+        if (!active) return;
+        setScanFileLogs([]);
+        setScanFileLogToken(null);
+        setScanFileLogsError('Unable to load scan file logs.');
+      } finally {
+        if (active) setIsLoadingScanFileLogs(false);
+      }
+    };
+
+    void loadScanFileLogs();
+
+    return () => {
+      active = false;
+    };
+  }, [devMode, showSettings]);
+
+  const refreshScanFileLogs = async () => {
+    setIsLoadingScanFileLogs(true);
+    setScanFileLogsError('');
+
+    try {
+      const response = await fetch('/api/dev/scan-file-logs?limit=40');
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setScanFileLogs([]);
+        setScanFileLogToken(null);
+        setScanFileLogsError(data?.error || 'Unable to load scan file logs.');
+        return;
+      }
+
+      setScanFileLogs(Array.isArray(data?.rows) ? data.rows : []);
+      setScanFileLogToken(typeof data?.latestScanToken === 'string' ? data.latestScanToken : null);
+    } catch {
+      setScanFileLogs([]);
+      setScanFileLogToken(null);
+      setScanFileLogsError('Unable to load scan file logs.');
+    } finally {
+      setIsLoadingScanFileLogs(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -198,12 +263,6 @@ export default function DashboardLayout() {
     if (stateData) setScanState(stateData);
   };
 
-  const applyTheme = (nextTheme: Theme) => {
-    setTheme(nextTheme);
-  };
-
-  const toggleTheme = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
-
   const toggleDevMode = () => {
     const nextValue = !devMode;
     setDevMode(nextValue);
@@ -240,6 +299,44 @@ export default function DashboardLayout() {
       }
     } catch {
       setScanMessage('Unable to reset the local database.');
+      setIsScanning(false);
+    } finally {
+      setIsResettingDevData(false);
+    }
+  };
+
+  const handleWipeOnly = async () => {
+    const confirmed = window.confirm(
+      'This will wipe the local database without starting a reingest. Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsResettingDevData(true);
+    setScanMessage('');
+
+    try {
+      const response = await fetch('/api/dev/reset-and-rescan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'wipe-only' }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setScanMessage(data?.error || data?.message || 'Unable to wipe the local database.');
+      } else {
+        setScanMessage(data?.message || 'Database wiped.');
+      }
+
+      const stateRes = await fetch('/api/scan');
+      const stateData = await stateRes.json().catch(() => null);
+      if (stateData) {
+        setScanState(stateData);
+      }
+      setIsScanning(false);
+    } catch {
+      setScanMessage('Unable to wipe the local database.');
       setIsScanning(false);
     } finally {
       setIsResettingDevData(false);
@@ -302,11 +399,6 @@ export default function DashboardLayout() {
       return { ...current, published_to: sliderValueToDate(clamped) };
     });
     return nextDate;
-  };
-
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    window.location.href = '/login';
   };
 
   const openPdfInNewWindow = (id: number, cacheKey?: string) => {
@@ -400,26 +492,6 @@ export default function DashboardLayout() {
         </nav>
 
         <div className="p-3 border-t border-[color:var(--border)] mt-auto flex items-center justify-center gap-2">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-3 py-3 text-slate-400 hover:text-red-500 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
-            title="Sign out"
-          >
-            <LogOut size={20} />
-            {!isCollapsed ? <span className="text-[10px] font-black uppercase tracking-[0.2em]">Exit</span> : null}
-          </button>
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-2 px-3 py-3 text-slate-400 hover:text-violet-600 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
-            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          >
-            {theme === 'dark' ? <SunMedium size={20} /> : <Moon size={20} />}
-            {!isCollapsed ? (
-              <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                {theme === 'dark' ? 'Light' : 'Dark'}
-              </span>
-            ) : null}
-          </button>
           <button
             onClick={() => setShowSettings(true)}
             className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-[var(--surface-muted)]"
@@ -645,7 +717,7 @@ export default function DashboardLayout() {
             ) : null}
 
             {view === 'keyCalls' ? (
-              <KeyCallTable />
+              <KeyCallTable onOpenViewer={openPdfInNewWindow} />
             ) : null}
 
             {view === 'chat' ? (
@@ -661,8 +733,8 @@ export default function DashboardLayout() {
       </div>
 
       {showSettings ? (
-        <div className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-950/30 backdrop-blur-sm px-6">
-          <div className="w-full max-w-xl rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] shadow-2xl shadow-slate-900/20 overflow-hidden">
+        <div className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-950/30 backdrop-blur-sm px-4 py-4 sm:px-6 sm:py-6">
+          <div className="flex w-full max-w-5xl max-h-[92vh] flex-col overflow-hidden rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] shadow-2xl shadow-slate-900/20">
             <div className="flex items-center justify-between px-6 py-5 border-b border-[color:var(--border)]">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-600">Settings</p>
@@ -677,7 +749,7 @@ export default function DashboardLayout() {
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="overflow-y-auto p-6 space-y-6">
               <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-5 py-4 flex items-center justify-between gap-4">
                 <div className="space-y-1">
                   <p className="text-sm font-black text-slate-900">Dev Mode</p>
@@ -704,27 +776,119 @@ export default function DashboardLayout() {
               </div>
 
               {devMode ? (
-                <div className="rounded-[1.75rem] border border-red-200 bg-red-50 px-5 py-5 space-y-4">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 text-red-500">
-                      <TriangleAlert size={18} />
+                <>
+                  <div className="rounded-[1.75rem] border border-red-200 bg-red-50 px-5 py-5 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 text-red-500">
+                        <TriangleAlert size={18} />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-black text-red-700">Danger Zone</p>
+                        <p className="text-sm text-red-600">
+                          Wipe the local SQLite database, with or without reingesting from the configured paper storage path.
+                        </p>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-black text-red-700">Danger Zone</p>
-                      <p className="text-sm text-red-600">
-                        Wipes the local SQLite database and reingests all PDFs from the configured paper storage path.
-                      </p>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={handleWipeOnly}
+                        disabled={isResettingDevData}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-red-300 bg-white px-4 py-3 text-sm font-black uppercase tracking-[0.16em] text-red-700 transition-all hover:bg-red-100 disabled:opacity-60"
+                      >
+                        {isResettingDevData ? <Loader2 size={16} className="animate-spin" /> : <Edit3 size={16} />}
+                        Wipe Only
+                      </button>
+                      <button
+                        onClick={handleResetAndReingest}
+                        disabled={isResettingDevData}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-black uppercase tracking-[0.16em] text-white shadow-lg shadow-red-600/20 transition-all hover:bg-red-700 disabled:opacity-60"
+                      >
+                        {isResettingDevData ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        Wipe DB And Reingest
+                      </button>
                     </div>
                   </div>
-                  <button
-                    onClick={handleResetAndReingest}
-                    disabled={isResettingDevData}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-black uppercase tracking-[0.16em] text-white shadow-lg shadow-red-600/20 transition-all hover:bg-red-700 disabled:opacity-60"
-                  >
-                    {isResettingDevData ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                    Wipe DB And Reingest
-                  </button>
-                </div>
+
+                  <div className="rounded-[1.75rem] border border-amber-200 bg-amber-50 px-5 py-5 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 text-amber-600">
+                          <FileWarning size={18} />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-black text-amber-800">Latest Scan Log</p>
+                          <p className="text-sm text-amber-700">
+                            Inspect the most recent per-file ingest outcomes, including parser and extraction failures.
+                          </p>
+                          <p className="text-xs font-semibold text-amber-700/80">
+                            {scanFileLogToken ? `Scan token: ${scanFileLogToken}` : 'No scan log rows recorded yet.'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => void refreshScanFileLogs()}
+                        disabled={isLoadingScanFileLogs}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-amber-300 bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.16em] text-amber-800 transition-all hover:bg-amber-100 disabled:opacity-60"
+                      >
+                        {isLoadingScanFileLogs ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        Refresh
+                      </button>
+                    </div>
+
+                    {scanFileLogsError ? (
+                      <div className="rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-semibold text-red-700">
+                        {scanFileLogsError}
+                      </div>
+                    ) : null}
+
+                    {scanFileLogs.length > 0 ? (
+                      <div className="overflow-hidden rounded-2xl border border-amber-200 bg-white">
+                        <div className="max-h-[56vh] overflow-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="bg-amber-100/80">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.16em] text-amber-800">Status</th>
+                                <th className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.16em] text-amber-800">File</th>
+                                <th className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.16em] text-amber-800">Stage</th>
+                                <th className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.16em] text-amber-800">Reason</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {scanFileLogs.map((log) => (
+                                <tr key={log.id} className="border-t border-amber-100 align-top">
+                                  <td className="px-4 py-3">
+                                    <span className={cn(
+                                      'inline-flex rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em]',
+                                      log.status === 'failed'
+                                        ? 'bg-red-100 text-red-700'
+                                        : log.status === 'ingested'
+                                          ? 'bg-emerald-100 text-emerald-700'
+                                          : 'bg-slate-100 text-slate-600'
+                                    )}>
+                                      {log.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="font-semibold text-slate-900">{log.filename}</div>
+                                    {log.error_message ? (
+                                      <div className="mt-1 text-xs text-slate-500">{log.error_message}</div>
+                                    ) : null}
+                                  </td>
+                                  <td className="px-4 py-3 text-slate-700">{log.stage || 'completed'}</td>
+                                  <td className="px-4 py-3 text-slate-700">{log.reason || 'ok'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-amber-300 bg-white px-4 py-8 text-center text-sm text-amber-800/80">
+                        {isLoadingScanFileLogs ? 'Loading scan file logs...' : 'No scan file logs recorded yet. Run a scan to populate this view.'}
+                      </div>
+                    )}
+                  </div>
+                </>
               ) : null}
             </div>
           </div>

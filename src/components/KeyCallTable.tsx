@@ -51,38 +51,38 @@ function normalizePeriodLabel(value: string) {
   const fyMatch = text.match(/\bFY[\s-]?(20\d{2}|\d{2})\b/i);
   if (fyMatch) {
     const year = fyMatch[1].length === 2 ? Number(`20${fyMatch[1]}`) : Number(fyMatch[1]);
-    return `FY${year}`;
+    return `FY${String(year).slice(-2)}`;
   }
 
   const quarterMatchA = text.match(/\b([1-4])Q[\s-]?(20\d{2}|\d{2})\b/i);
   if (quarterMatchA) {
     const year = quarterMatchA[2].length === 2 ? Number(`20${quarterMatchA[2]}`) : Number(quarterMatchA[2]);
-    return `${quarterMatchA[1]}Q${year}`;
+    return `${quarterMatchA[1]}Q${String(year).slice(-2)}`;
   }
 
   const quarterMatchB = text.match(/\bQ([1-4])[\s-]?(20\d{2}|\d{2})\b/i);
   if (quarterMatchB) {
     const year = quarterMatchB[2].length === 2 ? Number(`20${quarterMatchB[2]}`) : Number(quarterMatchB[2]);
-    return `${quarterMatchB[1]}Q${year}`;
+    return `${quarterMatchB[1]}Q${String(year).slice(-2)}`;
   }
 
   const plainYear = text.match(/^(20\d{2})$/);
-  if (plainYear) return `FY${plainYear[1]}`;
+  if (plainYear) return `FY${String(plainYear[1]).slice(-2)}`;
 
   return '';
 }
 
 function buildPeriodColumns(baseYear: number) {
   return [
-    `FY${baseYear - 1}`,
-    `1Q${baseYear}`,
-    `2Q${baseYear}`,
-    `3Q${baseYear}`,
-    `FY${baseYear}`,
-    `1Q${baseYear + 1}`,
-    `2Q${baseYear + 1}`,
-    `3Q${baseYear + 1}`,
-    `FY${baseYear + 1}`,
+    `FY${String(baseYear - 1).slice(-2)}`,
+    `1Q${String(baseYear).slice(-2)}`,
+    `2Q${String(baseYear).slice(-2)}`,
+    `3Q${String(baseYear).slice(-2)}`,
+    `FY${String(baseYear).slice(-2)}`,
+    `1Q${String(baseYear + 1).slice(-2)}`,
+    `2Q${String(baseYear + 1).slice(-2)}`,
+    `3Q${String(baseYear + 1).slice(-2)}`,
+    `FY${String(baseYear + 1).slice(-2)}`,
   ];
 }
 
@@ -108,7 +108,11 @@ function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function KeyCallTable() {
+function formatShortFiscalYear(year: number) {
+  return `FY${String(year).slice(-2)}`;
+}
+
+export default function KeyCallTable({ onOpenViewer }: { onOpenViewer?: (id: number, cacheKey?: string) => void }) {
   const [rows, setRows] = useState<KeyCallRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -183,6 +187,25 @@ export default function KeyCallTable() {
     });
   }, [rows, periodColumns]);
 
+  const groupedMappedRows = useMemo(() => {
+    const groups = new Map<string, {
+      indicator: string;
+      rows: typeof mappedRows;
+    }>();
+
+    for (const row of mappedRows) {
+      if (!groups.has(row.indicator)) {
+        groups.set(row.indicator, {
+          indicator: row.indicator,
+          rows: [],
+        });
+      }
+      groups.get(row.indicator)!.rows.push(row);
+    }
+
+    return Array.from(groups.values());
+  }, [mappedRows]);
+
   const unmappedRows = useMemo(
     () => rows.filter((row) => !normalizePeriodLabel(row.forecast_period)),
     [rows]
@@ -229,6 +252,17 @@ export default function KeyCallTable() {
       ...emptyEditorState(),
       ...defaults,
     });
+  };
+
+  const handleCellClick = (row: KeyCallRow | null, defaults?: Partial<EditorState>) => {
+    if (editMode) {
+      openEditorForCell(row, defaults);
+      return;
+    }
+
+    if (row?.paper_id) {
+      onOpenViewer?.(row.paper_id, row.paper_published_date || row.updated_at || undefined);
+    }
   };
 
   const handleSave = async () => {
@@ -336,7 +370,7 @@ export default function KeyCallTable() {
               ))}
             </select>
             <p className="text-sm text-slate-500">
-              Showing periods from <span className="font-black text-slate-800">{`FY${baseYear - 1}`}</span> through <span className="font-black text-slate-800">{`FY${baseYear + 1}`}</span>
+              Showing periods from <span className="font-black text-slate-800">{formatShortFiscalYear(baseYear - 1)}</span> through <span className="font-black text-slate-800">{formatShortFiscalYear(baseYear + 1)}</span>
             </p>
           </div>
         </div>
@@ -358,7 +392,7 @@ export default function KeyCallTable() {
           </button>
           {editMode ? (
             <button
-              onClick={() => openEditorForCell(null, { forecast_period: `FY${baseYear}`, publish_date: getTodayIsoDate() })}
+              onClick={() => openEditorForCell(null, { forecast_period: formatShortFiscalYear(baseYear), publish_date: getTodayIsoDate() })}
               className="px-4 py-2.5 rounded-2xl bg-emerald-600 text-white text-sm font-black uppercase tracking-[0.16em] hover:bg-emerald-700 transition-all flex items-center gap-2"
             >
               <Plus size={16} />
@@ -380,16 +414,16 @@ export default function KeyCallTable() {
         </div>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className={`grid gap-6 ${editMode ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
         <div className="overflow-hidden rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] shadow-xl shadow-slate-200/30">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-[var(--surface-soft)]">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[var(--surface-soft)] px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Indicator</th>
-                  <th className="sticky left-[180px] z-10 bg-[var(--surface-soft)] px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">House</th>
+                  <th className="sticky left-0 z-10 bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700">Indicator</th>
+                  <th className="sticky left-[180px] z-10 bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700">House</th>
                   {periodColumns.map((period) => (
-                    <th key={period} className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 whitespace-nowrap">{period}</th>
+                    <th key={period} className="px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700 whitespace-nowrap">{period}</th>
                   ))}
                 </tr>
               </thead>
@@ -400,205 +434,239 @@ export default function KeyCallTable() {
                       No mapped key-call periods available yet.
                     </td>
                   </tr>
-                ) : mappedRows.map((rowGroup) => (
-                  <tr key={`${rowGroup.indicator}-${rowGroup.house}`} className="border-t border-[color:var(--border)]">
-                    <td className="sticky left-0 z-10 bg-[var(--surface-strong)] px-4 py-4 font-black text-slate-900 min-w-[180px]">{rowGroup.indicator}</td>
-                    <td className="sticky left-[180px] z-10 bg-[var(--surface-strong)] px-4 py-4 font-semibold text-slate-700 min-w-[220px]">{rowGroup.house}</td>
-                    {periodColumns.map((period) => {
-                      const cell = rowGroup.cells[period];
-                      const tooltip = cell
-                        ? [
-                            `Value: ${cell.value}${cell.unit ? ` ${cell.unit}` : ''}`,
-                            `Date: ${cell.publish_date || cell.effective_date || 'Unknown'}`,
-                            `Source: ${cell.source_type === 'manual_input' ? 'Manual input' : 'Extracted from paper'}`,
-                            `House: ${cell.house}`,
-                            cell.paper_name ? `Paper: ${cell.paper_name}` : null,
-                          ].filter(Boolean).join('\n')
-                        : editMode
-                          ? `Add manual value for ${rowGroup.indicator} / ${rowGroup.house} / ${period}`
-                          : '';
+                ) : groupedMappedRows.map((indicatorGroup, groupIndex) => {
+                  const groupTone =
+                    groupIndex % 2 === 0
+                      ? {
+                          row: 'bg-violet-50/55 dark:bg-violet-950/28',
+                          sticky: 'bg-violet-100/90 dark:bg-violet-900/55',
+                          border: 'border-violet-200 dark:border-violet-800',
+                        }
+                      : {
+                          row: 'bg-[var(--surface-soft)]',
+                          sticky: 'bg-[var(--surface-strong)]',
+                          border: 'border-[color:var(--border)]',
+                        };
 
-                      return (
-                        <td key={`${rowGroup.indicator}-${rowGroup.house}-${period}`} className="px-3 py-3 align-top min-w-[140px]">
-                          <button
-                            type="button"
-                            title={tooltip}
-                            onClick={() => openEditorForCell(cell || null, {
-                              indicator: rowGroup.indicator,
-                              house: rowGroup.house,
-                              forecast_period: period,
-                            })}
-                            className={`w-full rounded-xl border px-3 py-2 text-left transition-all ${
-                              cell
-                                ? cell.source_type === 'manual_input'
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                                  : 'border-slate-200 bg-slate-50 text-slate-700'
-                                : editMode
-                                  ? 'border-dashed border-violet-300 bg-violet-50 text-violet-600 hover:bg-violet-100'
-                                  : 'border-transparent bg-transparent text-slate-300'
-                            }`}
-                          >
-                            {cell ? (
-                              <div className="space-y-1">
-                                <div className="font-black">{cell.value}</div>
-                                {cell.unit ? <div className="text-[10px] font-bold uppercase tracking-[0.16em]">{cell.unit}</div> : null}
-                              </div>
-                            ) : editMode ? (
-                              <span className="text-xs font-black uppercase tracking-[0.16em]">Add</span>
-                            ) : (
-                              <span>&nbsp;</span>
-                            )}
-                          </button>
+                  return indicatorGroup.rows.map((rowGroup, rowIndex) => (
+                    <tr
+                      key={`${rowGroup.indicator}-${rowGroup.house}`}
+                      className={`border-t-2 ${groupTone.border} ${groupTone.row}`}
+                    >
+                      {rowIndex === 0 ? (
+                        <td
+                          rowSpan={indicatorGroup.rows.length}
+                          className={`sticky left-0 z-10 px-4 py-4 align-top font-black min-w-[180px] text-slate-950 dark:text-white ${groupTone.sticky}`}
+                        >
+                          {rowGroup.indicator}
                         </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                      ) : null}
+                      <td
+                        className={`sticky left-[180px] z-10 px-4 py-4 font-semibold min-w-[220px] text-slate-950 dark:text-white ${groupTone.sticky}`}
+                      >
+                        {rowGroup.house}
+                      </td>
+                      {periodColumns.map((period) => {
+                        const cell = rowGroup.cells[period];
+                        const tooltip = cell
+                          ? [
+                              `Value: ${cell.value}${cell.unit ? ` ${cell.unit}` : ''}`,
+                              `Date: ${cell.publish_date || cell.effective_date || 'Unknown'}`,
+                              `Source: ${cell.source_type === 'manual_input' ? 'Manual input' : 'Extracted from paper'}`,
+                              `House: ${cell.house}`,
+                              cell.paper_name ? `Paper: ${cell.paper_name}` : null,
+                            ].filter(Boolean).join('\n')
+                          : editMode
+                            ? `Add manual value for ${rowGroup.indicator} / ${rowGroup.house} / ${period}`
+                            : '';
+
+                        return (
+                          <td
+                            key={`${rowGroup.indicator}-${rowGroup.house}-${period}`}
+                            className={`px-3 py-3 align-top min-w-[140px] ${groupTone.row}`}
+                          >
+                            <button
+                              type="button"
+                              title={tooltip}
+                              onClick={() => handleCellClick(cell || null, {
+                                indicator: rowGroup.indicator,
+                                house: rowGroup.house,
+                                forecast_period: period,
+                              })}
+                              className={`w-full rounded-xl border px-3 py-2 text-left transition-all ${
+                                cell
+                                  ? cell.source_type === 'manual_input'
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/45 dark:text-emerald-100'
+                                    : 'border-slate-200 bg-white/90 text-slate-950 dark:border-slate-600 dark:bg-slate-900/70 dark:text-white'
+                                  : editMode
+                                    ? 'border-dashed border-violet-300 bg-violet-50 text-violet-600 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-950/35 dark:text-violet-200 dark:hover:bg-violet-900/45'
+                                    : 'border-transparent bg-transparent text-slate-400 dark:text-slate-500'
+                              }`}
+                            >
+                              {cell ? (
+                                <div className="space-y-1">
+                                  <div className="font-black">{cell.value}</div>
+                                  {cell.unit ? <div className="text-[10px] font-bold uppercase tracking-[0.16em]">{cell.unit}</div> : null}
+                                </div>
+                              ) : editMode ? (
+                                <span className="text-xs font-black uppercase tracking-[0.16em]">Add</span>
+                              ) : (
+                                <span>&nbsp;</span>
+                              )}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ));
+                })}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] p-5 shadow-xl shadow-slate-200/30">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-600">Row Editor</p>
-              <h3 className="text-lg font-black text-slate-900">
-                {editor ? (editor.sourceType === 'new' ? 'Add Manual Key Call' : 'Edit Effective Value') : 'Select A Cell'}
-              </h3>
+        {editMode ? (
+          <div className="rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] p-5 shadow-xl shadow-slate-200/30">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-600">Row Editor</p>
+                <h3 className="text-lg font-black text-slate-900">
+                  {editor ? (editor.sourceType === 'new' ? 'Add Manual Key Call' : 'Edit Effective Value') : 'Select A Cell'}
+                </h3>
+              </div>
+              {editor ? (
+                <button
+                  onClick={() => setEditor(null)}
+                  className="p-2 rounded-xl border border-[color:var(--border)] text-slate-400 hover:text-slate-700"
+                  title="Close editor"
+                >
+                  <X size={16} />
+                </button>
+              ) : null}
             </div>
+
             {editor ? (
-              <button
-                onClick={() => setEditor(null)}
-                className="p-2 rounded-xl border border-[color:var(--border)] text-slate-400 hover:text-slate-700"
-                title="Close editor"
-              >
-                <X size={16} />
-              </button>
-            ) : null}
-          </div>
-
-          {editor ? (
-            <div className="space-y-3">
-              <label className="block space-y-1">
-                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Indicator</span>
-                <input
-                  list="key-call-indicator-options"
-                  value={editor.indicator}
-                  onChange={(event) => setEditor({ ...editor, indicator: event.target.value })}
-                  className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                  placeholder="GDP forecast, Inflation forecast, Exports"
-                />
-                <datalist id="key-call-indicator-options">
-                  {indicatorOptions.map((option) => <option key={option} value={option} />)}
-                </datalist>
-              </label>
-
-              <label className="block space-y-1">
-                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">House</span>
-                <input
-                  list="key-call-house-options"
-                  value={editor.house}
-                  onChange={(event) => setEditor({ ...editor, house: event.target.value })}
-                  className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                />
-                <datalist id="key-call-house-options">
-                  {houseOptions.map((option) => <option key={option} value={option} />)}
-                </datalist>
-              </label>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-3">
                 <label className="block space-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Value</span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Indicator</span>
                   <input
-                    value={editor.value}
-                    onChange={(event) => setEditor({ ...editor, value: event.target.value })}
+                    list="key-call-indicator-options"
+                    value={editor.indicator}
+                    onChange={(event) => setEditor({ ...editor, indicator: event.target.value })}
+                    className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                    placeholder="GDP forecast, Inflation forecast, Exports"
+                  />
+                  <datalist id="key-call-indicator-options">
+                    {indicatorOptions.map((option) => <option key={option} value={option} />)}
+                  </datalist>
+                </label>
+
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">House</span>
+                  <input
+                    list="key-call-house-options"
+                    value={editor.house}
+                    onChange={(event) => setEditor({ ...editor, house: event.target.value })}
                     className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
                   />
+                  <datalist id="key-call-house-options">
+                    {houseOptions.map((option) => <option key={option} value={option} />)}
+                  </datalist>
                 </label>
-                <label className="block space-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Unit</span>
-                  <input
-                    value={editor.unit}
-                    onChange={(event) => setEditor({ ...editor, unit: event.target.value })}
-                    className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                    placeholder="%YoY, %, USD, THB"
-                  />
-                </label>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="block space-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Forecast Period</span>
-                  <input
-                    value={editor.forecast_period}
-                    onChange={(event) => setEditor({ ...editor, forecast_period: event.target.value })}
-                    className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                    placeholder={`FY${baseYear}, 1Q${baseYear}, FY${baseYear + 1}`}
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Value Date</span>
-                  <input
-                    value={editor.publish_date}
-                    onChange={(event) => setEditor({ ...editor, publish_date: event.target.value })}
-                    className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                    placeholder="Paper date or manual update date"
-                  />
-                </label>
-              </div>
-
-              <label className="block space-y-1">
-                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Paper Name</span>
-                <input
-                  value={editor.paper_name}
-                  onChange={(event) => setEditor({ ...editor, paper_name: event.target.value })}
-                  className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                />
-              </label>
-
-              <label className="block space-y-1">
-                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Source Note</span>
-                <textarea
-                  value={editor.source_text}
-                  onChange={(event) => setEditor({ ...editor, source_text: event.target.value })}
-                  className="min-h-24 w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
-                  placeholder="Optional provenance note"
-                />
-              </label>
-
-              <div className="flex items-center justify-between gap-3 pt-2">
-                <div className="text-xs font-semibold text-slate-500">
-                  Source: <span className="font-black text-slate-800">{editor.sourceType === 'manual_input' ? 'Manual input' : editor.sourceType === 'extracted' ? 'Extracted row override' : 'New manual row'}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Value</span>
+                    <input
+                      value={editor.value}
+                      onChange={(event) => setEditor({ ...editor, value: event.target.value })}
+                      className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Unit</span>
+                    <input
+                      value={editor.unit}
+                      onChange={(event) => setEditor({ ...editor, unit: event.target.value })}
+                      className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                      placeholder="%YoY, %, USD, THB"
+                    />
+                  </label>
                 </div>
-                <div className="flex items-center gap-2">
-                  {(editor.manualId || editor.sourceType === 'extracted') ? (
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Forecast Period</span>
+                    <input
+                      value={editor.forecast_period}
+                      onChange={(event) => setEditor({ ...editor, forecast_period: event.target.value })}
+                      className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                      placeholder={`${formatShortFiscalYear(baseYear)}, 1Q${String(baseYear).slice(-2)}, ${formatShortFiscalYear(baseYear + 1)}`}
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Value Date</span>
+                    <input
+                      value={editor.publish_date}
+                      onChange={(event) => setEditor({ ...editor, publish_date: event.target.value })}
+                      className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                      placeholder="Paper date or manual update date"
+                    />
+                  </label>
+                </div>
+
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Paper Name</span>
+                  <input
+                    value={editor.paper_name}
+                    onChange={(event) => setEditor({ ...editor, paper_name: event.target.value })}
+                    className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                  />
+                </label>
+
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Source Note</span>
+                  <textarea
+                    value={editor.source_text}
+                    onChange={(event) => setEditor({ ...editor, source_text: event.target.value })}
+                    className="min-h-24 w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-slate-900 outline-none"
+                    placeholder="Optional provenance note"
+                  />
+                </label>
+
+                <div className="flex items-center justify-between gap-3 pt-2">
+                  <div className="text-xs font-semibold text-slate-500">
+                    Source: <span className="font-black text-slate-800">{editor.sourceType === 'manual_input' ? 'Manual input' : editor.sourceType === 'extracted' ? 'Extracted row override' : 'New manual row'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(editor.manualId || editor.sourceType === 'extracted') ? (
+                      <button
+                        onClick={() => void handleDelete()}
+                        disabled={saving}
+                        className="px-3 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 text-sm font-black uppercase tracking-[0.16em] flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    ) : null}
                     <button
-                      onClick={() => void handleDelete()}
+                      onClick={() => void handleSave()}
                       disabled={saving}
-                      className="px-3 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 text-sm font-black uppercase tracking-[0.16em] flex items-center gap-2 disabled:opacity-50"
+                      className="px-4 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 text-sm font-black uppercase tracking-[0.16em] flex items-center gap-2 disabled:opacity-50"
                     >
-                      <Trash2 size={14} />
-                      Delete
+                      {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                      Save
                     </button>
-                  ) : null}
-                  <button
-                    onClick={() => void handleSave()}
-                    disabled={saving}
-                    className="px-4 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 text-sm font-black uppercase tracking-[0.16em] flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    Save
-                  </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-[color:var(--border)] bg-[var(--surface-soft)] px-4 py-10 text-center text-sm text-slate-400">
-              Turn on <span className="font-black text-slate-700">Edit Table</span>, then click a populated or blank cell to override it with `manual_input`.
-            </div>
-          )}
-        </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-[color:var(--border)] bg-[var(--surface-soft)] px-4 py-10 text-center text-sm text-slate-400">
+                Turn on <span className="font-black text-slate-700">Edit Table</span>, then click a populated or blank cell to override it with `manual_input`.
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );

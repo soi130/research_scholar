@@ -21,6 +21,18 @@ type StoredForecastEntry = {
   forecast_period: string;
 };
 
+function extractFxPair(value: string) {
+  const match = normalizeString(value).match(/\b([A-Z]{3})\s*\/\s*([A-Z]{3})\b/i);
+  if (!match) return '';
+  return `${match[1].toUpperCase()}/${match[2].toUpperCase()}`;
+}
+
+function normalizeIndicatorLabel(indicator: string, sourceText: string) {
+  const fxPair = extractFxPair(indicator) || extractFxPair(sourceText);
+  if (fxPair) return fxPair;
+  return indicator;
+}
+
 export function normalizeStoredKeyCalls(value: unknown, defaults: { publish_date: string; house: string }): StoredKeyCallRow[] {
   if (!Array.isArray(value)) return [];
 
@@ -31,15 +43,16 @@ export function normalizeStoredKeyCalls(value: unknown, defaults: { publish_date
       const indicator = normalizeString(record.indicator);
       const rowValue = normalizeString(record.value);
       if (!indicator || !rowValue) return null;
+      const sourceText = normalizeString(record.source_text);
 
       return {
         publish_date: normalizeString(record.publish_date) || defaults.publish_date,
-        indicator,
+        indicator: normalizeIndicatorLabel(indicator, sourceText),
         house: normalizeString(record.house) || defaults.house,
         value: rowValue,
         unit: normalizeString(record.unit),
         forecast_period: normalizeString(record.forecast_period),
-        source_text: normalizeString(record.source_text),
+        source_text: sourceText,
       };
     })
     .filter((row): row is StoredKeyCallRow => Boolean(row));

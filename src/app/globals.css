@@ -1,22 +1,6 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
-  --background: #fdfcff;
-  --foreground: #1f173d;
-  --surface: rgba(255, 255, 255, 0.82);
-  --surface-strong: #ffffff;
-  --surface-soft: #f8f7ff;
-  --surface-muted: #eef0f7;
-  --border: rgba(99, 102, 241, 0.12);
-  --border-strong: rgba(99, 102, 241, 0.22);
-  --accent: #7c3aed;
-  --accent-soft: rgba(124, 58, 237, 0.12);
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(99, 102, 241, 0.08);
-}
-
-:root[data-theme="dark"] {
   color-scheme: dark;
   --background: #0f1016;
   --foreground: #f4efff;
@@ -35,8 +19,9 @@
 body {
   color: var(--foreground);
   background:
-    radial-gradient(circle at top, rgba(124, 58, 237, 0.08), transparent 32%),
-    var(--background);
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.15), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.06), transparent 22%),
+    linear-gradient(180deg, #13141b 0%, #0b0c12 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -47,76 +32,47 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--glass-border);
-}
-
-html[data-theme="dark"] .glass,
-html.dark .glass {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
 }
 
-html[data-theme="dark"] body,
-html.dark body {
-  background:
-    radial-gradient(circle at top, rgba(124, 58, 237, 0.15), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.06), transparent 22%),
-    linear-gradient(180deg, #13141b 0%, #0b0c12 100%);
-}
-
-html[data-theme="dark"] .bg-white,
-html.dark .bg-white,
-html[data-theme="dark"] .bg-slate-50,
-html.dark .bg-slate-50,
-html[data-theme="dark"] .bg-slate-100,
-html.dark .bg-slate-100 {
+.bg-white,
+.bg-slate-50,
+.bg-slate-100 {
   background-color: var(--surface) !important;
 }
 
-html[data-theme="dark"] .bg-slate-200,
-html.dark .bg-slate-200 {
+.bg-slate-200 {
   background-color: var(--surface-muted) !important;
 }
 
-html[data-theme="dark"] .border-slate-100,
-html.dark .border-slate-100,
-html[data-theme="dark"] .border-slate-200,
-html.dark .border-slate-200 {
+.border-slate-100,
+.border-slate-200 {
   border-color: var(--border) !important;
 }
 
-html[data-theme="dark"] .text-slate-900,
-html.dark .text-slate-900,
-html[data-theme="dark"] .text-slate-800,
-html.dark .text-slate-800 {
+.text-slate-900,
+.text-slate-800 {
   color: var(--foreground) !important;
 }
 
-html[data-theme="dark"] .text-slate-700,
-html.dark .text-slate-700 {
+.text-slate-700 {
   color: rgba(244, 239, 255, 0.9) !important;
 }
 
-html[data-theme="dark"] .text-slate-600,
-html.dark .text-slate-600,
-html[data-theme="dark"] .text-slate-500,
-html.dark .text-slate-500,
-html[data-theme="dark"] .text-slate-400,
-html.dark .text-slate-400 {
+.text-slate-600,
+.text-slate-500,
+.text-slate-400 {
   color: rgba(226, 219, 246, 0.72) !important;
 }
 
-html[data-theme="dark"] .shadow-slate-200\/20,
-html.dark .shadow-slate-200\/20,
-html[data-theme="dark"] .shadow-slate-200\/50,
-html.dark .shadow-slate-200\/50,
-html[data-theme="dark"] .shadow-slate-200\/80,
-html.dark .shadow-slate-200\/80,
-html[data-theme="dark"] .shadow-slate-200,
-html.dark .shadow-slate-200 {
+.shadow-slate-200\/20,
+.shadow-slate-200\/50,
+.shadow-slate-200\/80,
+.shadow-slate-200 {
   --tw-shadow-color: rgba(0, 0, 0, 0.35) !important;
 }
 
-html[data-theme="dark"] ::selection,
-html.dark ::selection {
+::selection {
   background: rgba(167, 139, 250, 0.28);
   color: var(--foreground);
 }

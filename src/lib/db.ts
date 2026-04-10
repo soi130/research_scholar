@@ -98,6 +98,17 @@ export async function getDb(): Promise<Database> {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS scan_file_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scan_token TEXT,
+      filename TEXT NOT NULL DEFAULT '',
+      filepath TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT '',
+      stage TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      error_message TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS paper_key_calls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       paper_id INTEGER NOT NULL,
@@ -194,6 +205,9 @@ export async function getDb(): Promise<Database> {
     CREATE INDEX IF NOT EXISTS idx_papers_publisher ON papers(publisher);
     CREATE INDEX IF NOT EXISTS idx_papers_latest_extraction_id ON papers(latest_extraction_id);
     CREATE INDEX IF NOT EXISTS idx_papers_topic_summary ON papers(status, published_date);
+    CREATE INDEX IF NOT EXISTS idx_scan_file_logs_scan_token ON scan_file_logs(scan_token, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_scan_file_logs_status ON scan_file_logs(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_scan_file_logs_filepath ON scan_file_logs(filepath);
     CREATE INDEX IF NOT EXISTS idx_paper_key_calls_paper_id ON paper_key_calls(paper_id);
     CREATE INDEX IF NOT EXISTS idx_paper_key_calls_publish_date ON paper_key_calls(publish_date);
     CREATE INDEX IF NOT EXISTS idx_paper_key_calls_indicator ON paper_key_calls(indicator);
