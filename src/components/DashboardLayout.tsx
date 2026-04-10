@@ -428,9 +428,9 @@ export default function DashboardLayout() {
   };
 
   const navItems = [
+    { id: 'keyCalls', label: 'Key Calls', icon: Edit3 },
     { id: 'library', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'review', label: 'Review Queue', icon: RefreshCw },
-    { id: 'keyCalls', label: 'Key Calls', icon: Edit3 },
     { id: 'graph', label: 'Knowledge Graph', icon: Share2 },
     { id: 'chat', label: 'AI Multi-Chat', icon: MessageSquareShare },
   ] as const satisfies ReadonlyArray<{ id: View; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }>;

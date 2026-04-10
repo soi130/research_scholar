@@ -416,14 +416,14 @@ export default function KeyCallTable({ onOpenViewer }: { onOpenViewer?: (id: num
 
       <div className={`grid gap-6 ${editMode ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
         <div className="overflow-hidden rounded-[2rem] border border-[color:var(--border)] bg-[var(--surface-strong)] shadow-xl shadow-slate-200/30">
-          <div className="overflow-x-auto">
+          <div className="max-h-[70vh] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-[var(--surface-soft)]">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700">Indicator</th>
-                  <th className="sticky left-[180px] z-10 bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700">House</th>
+                  <th className="sticky top-0 left-0 z-30 border-b border-[color:var(--border)] bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700 shadow-[0_1px_0_0_var(--border)]">Indicator</th>
+                  <th className="sticky top-0 left-[180px] z-30 border-b border-[color:var(--border)] bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700 shadow-[0_1px_0_0_var(--border)]">House</th>
                   {periodColumns.map((period) => (
-                    <th key={period} className="px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700 whitespace-nowrap">{period}</th>
+                    <th key={period} className="sticky top-0 z-20 border-b border-[color:var(--border)] bg-[var(--surface-soft)] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.14em] text-violet-700 whitespace-nowrap shadow-[0_1px_0_0_var(--border)]">{period}</th>
                   ))}
                 </tr>
               </thead>
